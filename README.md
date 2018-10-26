@@ -72,6 +72,6 @@ The saved replays can be watched by double-clicking on them or using the followi
 
 Documentation is a little sparse at the moment (but will improve!). Please raise an issue in this repo, or email [Tabish](mailto:tabish.rashid@cs.ox.ac.uk)
 
-### Copyright and usage restrictions
+## License
 
-PLEASE KEEP CONFIDENTIAL - USE FOR EDUCATIONAL / ACADEMIC PURPOSES ONLY
+Code licensed under the Apache License v2.0

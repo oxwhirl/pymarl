@@ -1,0 +1,36 @@
+# --- COMA specific parameters ---
+
+action_selector: "multinomial"
+epsilon_start: .5
+epsilon_finish: .01
+epsilon_anneal_time: 100000
+mask_before_softmax: True
+
+runner: "parallel"
+
+buffer_size: 8
+batch_size_run: 8
+batch_size: 8
+
+env_args:
+  state_last_action: False # critic adds last action internally
+
+# update the target network every {} training steps
+target_update_interval: 200
+recurrent_critic: False
+
+lr: 0.0005
+critic_lr: 0.0005
+td_lambda: 0.8
+
+# use COMA
+agent_output_type: "pi_logits"
+# learner: "actor_critic_learner"
+learner: "coma_learner"
+critic_q_fn: "coma"
+critic_baseline_fn: "coma"
+critic_train_mode: "seq"
+critic_train_reps: 1
+q_nstep: 0  # 0 corresponds to default Q, 1 is r + gamma*Q, etc
+
+name: "coma"

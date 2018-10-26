@@ -1,0 +1,29 @@
+# --- Defaults for SC1, only positive rewards, max cumulative reward=550 ---
+
+env: sc1
+
+env_args:
+  map_name: "m5v5_c_far"  # 5 marines by default; for 2 dragoons + 3 zealots, change to "dragoons_zealots"
+  hostname: localhost
+  heuristic: False
+  measure_fps: True
+  move_amount: 5
+  reward_death_value: 30
+  reward_negative_scale: 0.5
+  reward_only_positive: True
+  reward_scale: False
+  reward_scale_rate: 0
+  reward_win: 200
+  state_last_action: True
+  step_mul: 5
+  obs_instead_of_state: False
+  obs_own_health: True
+  obs_targets: False
+  continuing_episode: False
+
+test_nepisode: 32
+test_interval: 10000
+log_interval: 2000
+runner_log_interval: 2000
+learner_log_interval: 2000
+t_max: 2000000

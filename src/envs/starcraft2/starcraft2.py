@@ -61,7 +61,6 @@ StarCraft II
 class SC2(MultiAgentEnv):
 
     def __init__(self, **kwargs):
-
         args = kwargs["env_args"]
         if isinstance(args, dict):
             args = convert(args)
@@ -116,7 +115,7 @@ class SC2(MultiAgentEnv):
         self.map_type = map_params.map_type
 
         if sys.platform == 'linux':
-            os.environ['SC2PATH'] = os.path.join(os.getcwd(), "3rdparty", 'StarCraftII')
+            os.environ.setdefault('SC2PATH', os.path.join(os.getcwd(), "3rdparty", 'StarCraftII'))
             self.game_version = args.game_version
         else:
             # Can be derived automatically

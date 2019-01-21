@@ -18,7 +18,7 @@ class ParallelRunner:
         # Make subprocesses for the envs
         self.parent_conns, self.worker_conns = zip(*[Pipe() for _ in range(self.batch_size)])
         env_fn = env_REGISTRY[self.args.env]
-        self.ps = [Process(target=env_worker, args=(worker_conn, CloudpickleWrapper(partial(env_fn, env_args=self.args.env_args, args=self.args))))
+        self.ps = [Process(target=env_worker, args=(worker_conn, CloudpickleWrapper(partial(env_fn, **self.args.env_args))))
                             for worker_conn in self.worker_conns]
 
         for p in self.ps:
@@ -53,6 +53,10 @@ class ParallelRunner:
 
     def save_replay(self):
         pass
+
+    def close_env(self):
+        for parent_conn in self.parent_conns:
+            parent_conn.send(("close", None))
 
     def reset(self):
         self.batch = self.new_batch()
@@ -102,18 +106,19 @@ class ParallelRunner:
             }
             self.batch.update(actions_chosen, bs=envs_not_terminated, ts=self.t, mark_filled=False)
 
-            # Update terminated envs after adding post_transition_data
+            # Send actions to each env
+            action_idx = 0
+            for idx, parent_conn in enumerate(self.parent_conns):
+                if idx in envs_not_terminated: # We produced actions for this env
+                    if not terminated[idx]: # Only send the actions to the env if it hasn't terminated
+                        parent_conn.send(("step", cpu_actions[action_idx]))
+                    action_idx += 1 # actions is not a list over every env
+
+            # Update envs_not_terminated
             envs_not_terminated = [b_idx for b_idx, termed in enumerate(terminated) if not termed]
             all_terminated = all(terminated)
             if all_terminated:
                 break
-
-            # Send actions to each env
-            action_idx = 0
-            for idx, parent_conn in enumerate(self.parent_conns):
-                if not terminated[idx]:
-                    parent_conn.send(("step", cpu_actions[action_idx]))
-                    action_idx += 1 # actions is not a list over every env
 
             # Post step data we will insert for the current timestep
             post_transition_data = {
@@ -159,11 +164,19 @@ class ParallelRunner:
             self.t += 1
 
             # Add the pre-transition data
-
             self.batch.update(pre_transition_data, bs=envs_not_terminated, ts=self.t, mark_filled=True)
 
         if not test_mode:
             self.t_env += self.env_steps_this_run
+
+        # Get stats back for each env
+        for parent_conn in self.parent_conns:
+            parent_conn.send(("get_stats",None))
+
+        env_stats = []
+        for parent_conn in self.parent_conns:
+            env_stat = parent_conn.recv()
+            env_stats.append(env_stat)
 
         cur_stats = self.test_stats if test_mode else self.train_stats
         cur_returns = self.test_returns if test_mode else self.train_returns
@@ -228,10 +241,13 @@ def env_worker(remote, env_fn):
                 "obs": env.get_obs()
             })
         elif cmd == "close":
+            env.close()
             remote.close()
             break
         elif cmd == "get_env_info":
             remote.send(env.get_env_info())
+        elif cmd == "get_stats":
+            remote.send(env.get_stats())
         else:
             raise NotImplementedError
 

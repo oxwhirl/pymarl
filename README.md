@@ -1,14 +1,16 @@
 ```diff
-- This is an ALPHA release
+- This is an BETA release
 ```
 
 # Deep MARL framework
 
-Includes implementations of algorithms:
-- COMA
-- IQL
-- VDN 
-- QMIX
+PyMARL is framework for deep multi-agent reinforcement learning and includes implementations of the following algorithms:
+- [**QMIX**: QMIX: Monotonic Value Function Factorisation for Deep Multi-Agent Reinforcement Learning](https://arxiv.org/abs/1803.11485)
+- [**COMA**: Counterfactual Multi-Agent Policy Gradients](https://arxiv.org/abs/1705.08926)
+- [**VDN**: Value-Decomposition Networks For Cooperative Multi-Agent Learning](https://arxiv.org/abs/1706.05296) 
+- [**IQL**: Independent Q-Learning](https://arxiv.org/abs/1511.08779)
+
+PyMARL currently uses [SMAC](https://github.com/oxwhirl/smac) as its environment.
 
 ## Installation instructions
 
@@ -17,21 +19,17 @@ Build the Dockerfile using
 cd docker
 bash build.sh
 ```
-Set up StarCraft I
-> bash install_sc1.sh
 
-This will download the necessary sc1 files from [this](https://github.com/oxwhirl/starcraft_ubuntu/) repo into the 3rdparty folder.
-
-Set up StarCraft II.
+Set up StarCraft II and SMAC.
 > bash install_sc2.sh
 
-This will download SC2 into the 3rd party folder and copy the maps necessary to run over.
+This will download SC2 into the 3rdparty folder and copy the maps necessary to run over.
 
 The requirements.txt file can be used to install the necessary packages into a virtual environment (not recomended).
 
 ## Run an experiment 
 
-> python3 src/main.py --config=qmix --env-config=sc2 with env_args.map_name=2s_3z
+> python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
 
 The config files act as defaults for an algorithm or environment. 
 
@@ -40,7 +38,7 @@ They are all located in `src/config`.
 `--env-config` refers to the config files in `src/config/envs`
 
 To run stuff using the Docker container:
-> bash run.sh $GPU python3 src/main.py --config=qmix --env-config=sc2 with env_args.map_name=2s_3z
+> bash run.sh $GPU python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
 
 All results will be stored in the `Results` folder.
 
@@ -63,10 +61,6 @@ The saved replays can be watched by double-clicking on them or using the followi
 > python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
 
 (The window size is quite small at the moment, but will be fixed once deepmind accepts my pull request).
-
-## Potential Issues
-
-* StarCraft1 env is untested and might not behave as expected
 
 ## Documentation/Support
 

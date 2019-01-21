@@ -4,9 +4,12 @@
 action_selector: "epsilon_greedy"
 epsilon_start: 1.0
 epsilon_finish: 0.05
-epsilon_anneal_time: 20000
+epsilon_anneal_time: 50000
 
-buffer_size: 500
+runner: "parallel"
+batch_size_run: 8
+
+buffer_size: 5000
 
 # update the target network every {} episodes
 target_update_interval: 200
@@ -17,4 +20,4 @@ learner: "q_learner"
 double_q: True
 mixer: "vdn"
 
-name: "vdn"
+name: "vdn_smac_parallel"

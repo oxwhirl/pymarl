@@ -1,21 +1,14 @@
 from functools import partial
-from .multiagentenv import MultiAgentEnv
-from .starcraft2 import StarCraft2Env
+from smac.env import MultiAgentEnv, StarCraft2Env
+import sys
+import os
 
-
-def env_fn(env, **kwargs) -> MultiAgentEnv: # TODO: this may be a more complex function
+def env_fn(env, **kwargs) -> MultiAgentEnv:
     return env(**kwargs)
 
-
 REGISTRY = {}
+REGISTRY["sc2"] = partial(env_fn, env=StarCraft2Env)
 
-try:
-    from .starcraft1 import StarCraft1Env
-    REGISTRY["sc1"] = partial(env_fn,
-                              env=StarCraft1Env)
-except Exception as e:
-    print(e)
-
-REGISTRY["sc2"] = partial(env_fn,
-                          env=StarCraft2Env)
-
+if sys.platform == "linux":
+    os.environ.setdefault("SC2PATH",
+                          os.path.join(os.getcwd(), "3rdparty", "StarCraftII"))

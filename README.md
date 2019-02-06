@@ -1,10 +1,10 @@
 ```diff
-- This is an BETA release
+- This is a BETA release
 ```
 
 # Deep MARL framework
 
-PyMARL is framework for deep multi-agent reinforcement learning and includes implementations of the following algorithms:
+PyMARL is [WhiRL](http://whirl.cs.ox.ac.uk)'s framework for deep multi-agent reinforcement learning and includes implementations of the following algorithms:
 - [**QMIX**: QMIX: Monotonic Value Function Factorisation for Deep Multi-Agent Reinforcement Learning](https://arxiv.org/abs/1803.11485)
 - [**COMA**: Counterfactual Multi-Agent Policy Gradients](https://arxiv.org/abs/1705.08926)
 - [**VDN**: Value-Decomposition Networks For Cooperative Multi-Agent Learning](https://arxiv.org/abs/1706.05296) 
@@ -15,13 +15,15 @@ PyMARL currently uses [SMAC](https://github.com/oxwhirl/smac) as its environment
 ## Installation instructions
 
 Build the Dockerfile using 
-```
+```shell
 cd docker
 bash build.sh
 ```
 
-Set up StarCraft II and SMAC.
-> bash install_sc2.sh
+Set up StarCraft II and SMAC:
+```shell
+bash install_sc2.sh
+```
 
 This will download SC2 into the 3rdparty folder and copy the maps necessary to run over.
 
@@ -29,7 +31,9 @@ The requirements.txt file can be used to install the necessary packages into a v
 
 ## Run an experiment 
 
-> python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
+```shell
+python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
+```
 
 The config files act as defaults for an algorithm or environment. 
 
@@ -38,7 +42,9 @@ They are all located in `src/config`.
 `--env-config` refers to the config files in `src/config/envs`
 
 To run stuff using the Docker container:
-> bash run.sh $GPU python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
+```shell
+bash run.sh $GPU python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
+```
 
 All results will be stored in the `Results` folder.
 
@@ -58,9 +64,9 @@ Learnt models can be loaded using the `checkpoint_path` parameter, after which t
 
 The saved replays can be watched by double-clicking on them or using the following command:
 
-> python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
-
-(The window size is quite small at the moment, but will be fixed once deepmind accepts my pull request).
+```shell
+python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
+```
 
 ## Documentation/Support
 

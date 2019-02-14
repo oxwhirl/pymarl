@@ -79,9 +79,9 @@ class EpisodeBatch:
 
     def to(self, device):
         for k, v in self.data.transition_data.items():
-            v = v.to(device)
+            self.data.transition_data[k] = v.to(device)
         for k, v in self.data.episode_data.items():
-            v = v.to(device)
+            self.data.episode_data[k] = v.to(device)
         self.device = device
 
     def update(self, data, bs=slice(None), ts=slice(None), mark_filled=True):

@@ -43,7 +43,7 @@ They are all located in `src/config`.
 
 To run stuff using the Docker container:
 ```shell
-bash run.sh $GPU python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s3z
+bash run.sh $GPU python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s_3z
 ```
 
 All results will be stored in the `Results` folder.

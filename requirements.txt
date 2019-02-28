@@ -27,7 +27,7 @@ protobuf==3.6.1
 py==1.6.0
 pygame==1.9.4
 pyparsing==2.2.2
-git+git://github.com/deepmind/pysc2@a9f093493c4c77adb385602790a480e7f238b97d
+pysc2==2.0.2
 pytest==3.8.2
 python-dateutil==2.7.3
 PyYAML==3.13

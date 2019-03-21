@@ -68,6 +68,8 @@ The saved replays can be watched by double-clicking on them or using the followi
 python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
 ```
 
+**Note:** Replays cannot be watched using the Linux version of StarCraft II. Please use either the Mac or Windows version of the StarCraft II client.
+
 ## Documentation/Support
 
 Documentation is a little sparse at the moment (but will improve!). Please raise an issue in this repo, or email [Tabish](mailto:tabish.rashid@cs.ox.ac.uk)

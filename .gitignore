@@ -1,4 +1,4 @@
 3rdparty/
 results/
 **/__pycache__/
-
+.idea/

@@ -3,7 +3,7 @@ env: sc2
 env_args:
   continuing_episode: False
   difficulty: "7"
-  game_version: "4.6.2"
+  game_version: "4.8.2"
   map_name: "3m"
   move_amount: 2
   obs_all_health: True

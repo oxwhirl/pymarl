@@ -74,14 +74,14 @@ python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
 
 Documentation is a little sparse at the moment (but will improve!). Please raise an issue in this repo, or email [Tabish](mailto:tabish.rashid@cs.ox.ac.uk)
 
-#### Help
+### Help
 
 To see available comand options, specify both `--config` and `--env-config` e.g.:
 ```bash
 python src/main.py --config=qmix_smac --env-config=sc2 --help
 ```
 
-#### Running without CUDA
+### Running without CUDA
 
 PyMARL will use CUDA if a GPU is available. In some cases, a GPU is available but it does't meet the requirements for
 training a model. To force running in CPU mode, set the `use_cuda` option eg.:

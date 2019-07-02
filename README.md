@@ -32,7 +32,7 @@ The requirements.txt file can be used to install the necessary packages into a v
 ## Run an experiment 
 
 ```shell
-python3 src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s3z
+python src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s3z
 ```
 
 The config files act as defaults for an algorithm or environment. 
@@ -73,6 +73,22 @@ python -m pysc2.bin.play --norender --rgb_minimap_size 0 --replay NAME.SC2Replay
 ## Documentation/Support
 
 Documentation is a little sparse at the moment (but will improve!). Please raise an issue in this repo, or email [Tabish](mailto:tabish.rashid@cs.ox.ac.uk)
+
+#### Help
+
+To see available comand options, specify both `--config` and `--env-config` e.g.:
+```bash
+python src/main.py --config=qmix_smac --env-config=sc2 --help
+```
+
+#### Running without CUDA
+
+PyMARL will use CUDA if a GPU is available. In some cases, a GPU is available but it does't meet the requirements for
+training a model. To force running in CPU mode, set the `use_cuda` option eg.:
+
+```bash
+python src/main.py --config=qmix_smac --env-config=sc2 with env_args.map_name=2s3z use_cuda=False
+```
 
 ## Citing PyMARL 
 

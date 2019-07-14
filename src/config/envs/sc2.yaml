@@ -3,7 +3,7 @@ env: sc2
 env_args:
   continuing_episode: False
   difficulty: "7"
-  game_version: "4.8.2"
+  game_version: null
   map_name: "3m"
   move_amount: 2
   obs_all_health: True
@@ -12,6 +12,7 @@ env_args:
   obs_own_health: True
   obs_pathing_grid: False
   obs_terrain_height: False
+  obs_timestep_number: False
   reward_death_value: 10
   reward_defeat: 0
   reward_negative_scale: 0.5
@@ -23,6 +24,7 @@ env_args:
   replay_dir: ""
   replay_prefix: ""
   state_last_action: True
+  state_timestep_number: False
   step_mul: 8
   debug: False
 

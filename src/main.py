@@ -24,14 +24,15 @@ results_path = os.path.join(dirname(dirname(abspath(__file__))), "results")
 
 
 @ex.main
-def my_main(_run, _config, _log, env_args):
+def my_main(_run, _config, _log):
     # Setting the random seed throughout the modules
-    np.random.seed(_config["seed"])
-    th.manual_seed(_config["seed"])
-    env_args['seed'] = _config["seed"]
+    config = config_copy(_config)
+    np.random.seed(config["seed"])
+    th.manual_seed(config["seed"])
+    config['env_args']['seed'] = config["seed"]
 
     # run the framework
-    run(_run, _config, _log)
+    run(_run, config, _log)
 
 
 def _get_config(params, arg_name, subfolder):
@@ -58,6 +59,15 @@ def recursive_dict_update(d, u):
         else:
             d[k] = v
     return d
+
+
+def config_copy(config):
+    if isinstance(config, dict):
+        return {k: config_copy(v) for k, v in config.items()}
+    elif isinstance(config, list):
+        return [config_copy(v) for v in config]
+    else:
+        return deepcopy(config)
 
 
 if __name__ == '__main__':

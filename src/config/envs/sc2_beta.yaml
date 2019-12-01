@@ -30,10 +30,10 @@ env_args:
   heuristic_ai: False
   debug: False
 
+learner_log_interval: 20000
+log_interval: 20000
+runner_log_interval: 20000
+t_max: 10050000
+test_interval: 20000
+test_nepisode: 24
 test_greedy: True
-test_nepisode: 32
-test_interval: 10000
-log_interval: 10000
-runner_log_interval: 10000
-learner_log_interval: 10000
-t_max: 2050000

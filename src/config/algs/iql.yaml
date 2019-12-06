@@ -17,6 +17,6 @@ target_update_interval: 200
 agent_output_type: "q"
 learner: "q_learner"
 double_q: True
-mixer: None
+mixer: # Mixer becomes None
 
 name: "iql"

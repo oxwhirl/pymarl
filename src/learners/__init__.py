@@ -6,4 +6,4 @@ REGISTRY = {}
 
 REGISTRY["q_learner"] = QLearner
 REGISTRY["coma_learner"] = COMALearner
-REGISTRY["qtran_learnet"] = QTranLearner
+REGISTRY["qtran_learner"] = QTranLearner

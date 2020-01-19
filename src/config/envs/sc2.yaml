@@ -28,6 +28,7 @@ env_args:
   step_mul: 8
   seed: null
   heuristic_ai: False
+  heuristic_rest: False
   debug: False
 
 test_greedy: True

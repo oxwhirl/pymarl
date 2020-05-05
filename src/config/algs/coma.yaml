@@ -31,4 +31,4 @@ critic_train_mode: "seq"
 critic_train_reps: 1
 q_nstep: 0  # 0 corresponds to default Q, 1 is r + gamma*Q, etc
 
-name: "coma_smac"
+name: "coma"

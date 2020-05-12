@@ -104,6 +104,7 @@ def run_sequential(args, logger):
                           preprocess=preprocess,
                           device="cpu" if args.buffer_cpu_only else args.device)
 
+
     # Setup multiagent controller here
     mac = mac_REGISTRY[args.mac](buffer.scheme, groups, args)
 
@@ -113,8 +114,12 @@ def run_sequential(args, logger):
     # Learner
     learner = le_REGISTRY[args.learner](mac, buffer.scheme, logger, args)
 
+    # Model learner
+    model_learner = le_REGISTRY[args.model_learner](args) # (mac, buffer.scheme, logger, args)
+
     if args.use_cuda:
         learner.cuda()
+        model_learner.cuda()
 
     if args.checkpoint_path != "":
 
@@ -176,6 +181,7 @@ def run_sequential(args, logger):
             if episode_sample.device != args.device:
                 episode_sample.to(args.device)
 
+            model_learner.train(episode_sample, runner.t_env, episode)
             learner.train(episode_sample, runner.t_env, episode)
 
         # Execute test runs once in a while

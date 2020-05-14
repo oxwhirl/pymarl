@@ -20,12 +20,22 @@ class SimPLeLearner:
 
         # Get the relevant quantities
         states = batch["state"][:, :-1]
-        actions = batch["actions"][:, :-1]
+        actions = batch["actions_onehot"][:, :-1]
         rewards = batch["reward"][:, :-1]
 
         terminated = batch["terminated"][:, :-1].float()
         mask = batch["filled"][:, :-1].float()
         mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
 
+        # save tensors into temp dir
+        import os
+        tmp_dir = "tmp"
+        if not os.path.exists(tmp_dir):
+            os.mkdir("tmp")
+        for t, n in [(states, "states"), (actions, "actions"), (rewards, "rewards"), (terminated, "terminated")
+            , (mask, "mask")]:
+            th.save(t, os.path.join(tmp_dir, f"{n}_{episode_num:04}.pt"))
+
+
     def cuda(self):
-        pass
+        self.model.cuda()

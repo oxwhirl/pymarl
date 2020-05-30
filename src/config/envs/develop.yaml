@@ -31,12 +31,18 @@ env_args:
   heuristic_rest: False
   debug: False
 
+runner: "parallel"
+batch_size_run: 32 # Number of environments to run in parallel
 batch_size: 32
-batch_size_run: 1 # Number of environments to run in parallel
+
 test_greedy: True
-test_nepisode: 32
+test_nepisode: 1000
 test_interval: 1000
 log_interval: 1000
 runner_log_interval: 1000
 learner_log_interval: 1000
 t_max: 100000
+
+save_episodes: False
+episode_dir: episodes
+clear_existing_episodes: False

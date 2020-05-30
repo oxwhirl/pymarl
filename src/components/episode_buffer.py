@@ -1,6 +1,9 @@
 import torch as th
 import numpy as np
 from types import SimpleNamespace as SN
+import pickle
+import os
+from glob import glob
 
 
 class EpisodeBatch:
@@ -206,11 +209,27 @@ class EpisodeBatch:
 
 
 class ReplayBuffer(EpisodeBatch):
-    def __init__(self, scheme, groups, buffer_size, max_seq_length, preprocess=None, device="cpu"):
+    def __init__(self, scheme, groups, buffer_size, max_seq_length, preprocess=None, device="cpu",
+                 save_episodes=False, episode_dir=None, clear_existing_episodes=True):
         super(ReplayBuffer, self).__init__(scheme, groups, buffer_size, max_seq_length, preprocess=preprocess, device=device)
         self.buffer_size = buffer_size  # same as self.batch_size but more explicit
         self.buffer_index = 0
         self.episodes_in_buffer = 0
+        self.save_index = 0
+        self.save_episodes = save_episodes
+        self.save_dir = episode_dir
+        self.clear_existing_episodes = clear_existing_episodes
+
+        if self.save_episodes:
+            if self.save_dir:
+                if os.path.exists(self.save_dir):
+                    files = glob(os.path.join(self.save_dir, "episode_*.pkl"))
+                    for f in files:
+                        os.remove(f)
+                else:
+                    os.mkdir(self.save_dir)
+            else:
+                raise Exception("Please specify 'episode_dir' or set 'save_episodes' to False")
 
     def insert_episode_batch(self, ep_batch):
         if self.buffer_index + ep_batch.batch_size <= self.buffer_size:
@@ -220,6 +239,12 @@ class ReplayBuffer(EpisodeBatch):
                         mark_filled=False)
             self.update(ep_batch.data.episode_data,
                         slice(self.buffer_index, self.buffer_index + ep_batch.batch_size))
+
+            if self.save_episodes:
+                for i in range(self.buffer_index, self.buffer_index + ep_batch.batch_size):
+                    self.save_episode(self[[i]])
+                    #self.save_episode(self.sample(1))
+
             self.buffer_index = (self.buffer_index + ep_batch.batch_size)
             self.episodes_in_buffer = max(self.episodes_in_buffer, self.buffer_index)
             self.buffer_index = self.buffer_index % self.buffer_size
@@ -240,6 +265,14 @@ class ReplayBuffer(EpisodeBatch):
             # Uniform sampling only atm
             ep_ids = np.random.choice(self.episodes_in_buffer, batch_size, replace=False)
             return self[ep_ids]
+
+    def save_episode(self, episode):
+        if os.path.exists(self.save_dir):
+
+            fname = os.path.join(self.save_dir, f"episode_{self.save_index + 1:06}.pkl")
+            with open(fname, 'wb') as f:
+                pickle.dump(episode.data.transition_data, f)
+            self.save_index += 1
 
     def __repr__(self):
         return "ReplayBuffer. {}/{} episodes. Keys:{} Groups:{}".format(self.episodes_in_buffer,

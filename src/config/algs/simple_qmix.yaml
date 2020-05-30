@@ -6,8 +6,6 @@ epsilon_start: 1.0
 epsilon_finish: 0.05
 epsilon_anneal_time: 50000
 
-runner: "episode"
-
 buffer_size: 5000
 
 # update the target network every {} episodes
@@ -17,10 +15,20 @@ target_update_interval: 200
 agent_output_type: "q"
 learner: "q_learner"
 double_q: True
-model_learner: "simple_learner"
 mixer: "qmix"
 mixing_embed_dim: 32
 hypernet_layers: 2
 hypernet_embed: 64
+
+# environment model learning
+model_learner: "simple_learner"
+model_train_epochs: 50
+model_train_log_epochs: 10
+model_train_batch_size: 32
+model_learning_rate: 0.01
+model_grad_clip_norm: 10
+model_buffer_size: 256
+model_policy_steps: 10
+model_hidden_dim: 64
 
 name: "simple_qmix"

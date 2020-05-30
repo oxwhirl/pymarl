@@ -83,6 +83,7 @@ def run_sequential(args, logger):
     args.n_agents = env_info["n_agents"]
     args.n_actions = env_info["n_actions"]
     args.state_shape = env_info["state_shape"]
+    args.episode_limit = env_info["episode_limit"]
 
     # Default/Base scheme
     scheme = {
@@ -102,7 +103,10 @@ def run_sequential(args, logger):
 
     buffer = ReplayBuffer(scheme, groups, args.buffer_size, env_info["episode_limit"] + 1,
                           preprocess=preprocess,
-                          device="cpu" if args.buffer_cpu_only else args.device)
+                          device="cpu" if args.buffer_cpu_only else args.device,
+                          save_episodes=True if args.save_episodes else False,
+                          episode_dir=args.episode_dir,
+                          clear_existing_episodes=args.clear_existing_episodes) # TODO maybe just pass args
 
 
     # Setup multiagent controller here
@@ -115,11 +119,14 @@ def run_sequential(args, logger):
     learner = le_REGISTRY[args.learner](mac, buffer.scheme, logger, args)
 
     # Model learner
-    model_learner = le_REGISTRY[args.model_learner](args) # (mac, buffer.scheme, logger, args)
+    model_learner = None
+    if args.model_learner:
+        model_learner = le_REGISTRY[args.model_learner](mac, buffer.scheme, logger, args)
 
     if args.use_cuda:
         learner.cuda()
-        model_learner.cuda()
+        if model_learner:
+            model_learner.cuda()
 
     if args.checkpoint_path != "":
 
@@ -154,6 +161,9 @@ def run_sequential(args, logger):
             evaluate_sequential(args, runner)
             return
 
+        #TODO checkpoints for model_learner
+
+
     # start training
     episode = 0
     last_test_T = -args.test_interval - 1
@@ -172,6 +182,34 @@ def run_sequential(args, logger):
         buffer.insert_episode_batch(episode_batch)
 
         if buffer.can_sample(args.batch_size):
+
+            # # save the buffer
+            # import pickle
+            # with open(f"buffers/buffer_{runner.t_env}.pkl", 'wb') as f:
+            #     pickle.dump(buffer, f)
+
+            if model_learner:
+
+                # supervised training of a model
+                model_learner.train(buffer)
+
+                # generate buffer of synthetic episodes from real starts
+                # model_episodes = model_learner.generate_episodes() # of type ReplayBuffer
+                #
+                # # perform several iterations of policy improvement using synthetic episodes
+                # for i in range(args.model_policy_steps):
+                #     episode_sample = model_episodes.sample(args.batch_size)
+                #
+                #     # Truncate batch to only filled timesteps
+                #     max_ep_t = episode_sample.max_t_filled()
+                #     episode_sample = episode_sample[:, :max_ep_t]
+                #
+                #     if episode_sample.device != args.device:
+                #         episode_sample.to(args.device)
+                #
+                #     learner.train(episode_sample, runner.t_env, episode)
+            #else:
+
             episode_sample = buffer.sample(args.batch_size)
 
             # Truncate batch to only filled timesteps
@@ -181,7 +219,6 @@ def run_sequential(args, logger):
             if episode_sample.device != args.device:
                 episode_sample.to(args.device)
 
-            model_learner.train(episode_sample, runner.t_env, episode)
             learner.train(episode_sample, runner.t_env, episode)
 
         # Execute test runs once in a while

@@ -1,25 +1,28 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SimPLeModel(nn.Module):
+class SimPLeStateModel(nn.Module):
 
-    def __init__(self, input_shape, output_shape, hidden_dim): # TODO enable setting hidden dim via args
+    def __init__(self, hidden_size, state_size, action_size, reward_size=1, term_size=1):
         super().__init__()
 
-        self.hidden_dim = hidden_dim
+        self.hidden_size = hidden_size
+        self.state_size = state_size
+        self.action_size = action_size
+        self.reward_size = reward_size
+        self.term_size = term_size
 
-        self.fc1 = nn.Linear(input_shape, hidden_dim)
-        self.rnn = nn.GRUCell(hidden_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, output_shape)
+        input_size = state_size + action_size
+        output_size = state_size + reward_size + term_size
 
-    def init_hidden(self):
-        # make hidden states on same device as model
-        return self.fc1.weight.new(1, self.hidden_dim).zero_()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.rnn = nn.LSTMCell(hidden_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
 
-    def forward(self, inputs, hidden_state):
-        x = F.relu(self.fc1(inputs))
-        h_in = hidden_state.reshape(-1, self.hidden_dim)
-        h = self.rnn(x, h_in)
-        q = self.fc2(h)
-        return q, h
+    def forward(self, xt, ht, ct):
+        xt = F.relu(self.fc1(xt))
+        ht, ct = self.rnn(xt, (ht, ct))
+        yt = self.fc2(ht)
+
+        return yt, ht, ct
 

@@ -22,7 +22,10 @@ hypernet_embed: 64
 
 # model learning
 model_learner: "simple_learner"
+model_rollout_batch_size: 32 # batch of real starts sampled from replay buffer
+model_rollouts: 256 # number of synthetic rollouts to generate
 model_policy_improvement_steps: 10
+model_training_test_ratio: 0.1
 
 # environment state model learning
 state_model_train_epochs: 50
@@ -33,7 +36,7 @@ state_model_grad_clip_norm: 1
 state_model_hidden_dim: 64
 
 # environment observation model learning
-obs_model_train_epochs: 100
+obs_model_train_epochs: 50
 obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 32
 obs_model_learning_rate: 0.01

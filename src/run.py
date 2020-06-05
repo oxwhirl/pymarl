@@ -190,12 +190,13 @@ def run_sequential(args, logger):
 
             if model_learner:
 
-                # supervised training of a model
+                # supervised training of state and observation models
                 model_learner.train(buffer)
 
-                # generate buffer of synthetic episodes from real starts
-                # model_episodes = model_learner.generate_episodes() # of type ReplayBuffer
-                #
+                # generate buffer of synthetic episodes from real starts and the multi-agent controller
+                #model_episodes = model_learner.generate_episodes(buffer, args.model_rollouts) # of type ReplayBuffer
+
+
                 # # perform several iterations of policy improvement using synthetic episodes
                 # for i in range(args.model_policy_steps):
                 #     episode_sample = model_episodes.sample(args.batch_size)

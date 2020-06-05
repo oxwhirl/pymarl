@@ -166,25 +166,23 @@ class SimPLeLearner:
                 val_err = []
                 # self.logger.console_logger.info(f"Model training epoch {i}")
 
-    def get_obs_model_input_output(self, state, actions, reward, term_signal, obs, aa, mask):
-        y = torch.cat((obs, aa), dim=-1)
-        return state, actions, term_signal, y
+    def shift(self, t, n, pad=0):
+        t = torch.roll(t, n, 1)
+        t[:, :n, :] = pad
+        return t
 
-    def run_obs_model(self, state, action, term_signal):
+    def get_obs_model_input_output(self, state, action, reward, term_signal, obs, aa, mask):
+        y = torch.cat((obs, aa), dim=-1)
+        return state, action, term_signal, y
+
+    def run_obs_model(self, state, last_action, term_signal):
         bs, steps, state_size = state.size()
         ht_ct = self.obs_model.init_hidden(bs, self.device)
         yp = torch.zeros(bs, steps, self.obs_model_output_size).to(self.device)
 
-        # add last action
-        # actions are generated after the observation so the first one is null and the last one is omitted
-        last_action = action[:, :-1, :].to(self.device)
-        a0 = torch.zeros_like(last_action[:, 0, :]).to(self.device)
-        a0 = torch.unsqueeze(a0, dim=1)
-        last_action = torch.cat((a0, last_action), dim=1)
-
         for t in range(0, steps):
 
-            st = state[:, 0, :]
+            st = state[:, t, :]
             at = last_action[:, t, :]
             tt = term_signal[:, t, :]
 
@@ -196,7 +194,6 @@ class SimPLeLearner:
             yt, ht_ct = self.obs_model(xt, ht_ct)
             yp[:, t, :] = yt
 
-            st = yt[:, :state_size]
         return yp
 
     def train_obs_model(self, train_episodes, test_episodes):
@@ -232,7 +229,7 @@ class SimPLeLearner:
 
             # generate obs from states
             self.obs_model.train()
-            yp = self.run_obs_model(m_state, action, term_signal.to(self.device))
+            yp = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
 
             # train obs model
             optimizer.zero_grad()
@@ -255,7 +252,7 @@ class SimPLeLearner:
 
                 # generate obs from states
                 self.obs_model.eval()
-                yp = self.run_obs_model(m_state, action, term_signal.to(self.device))
+                yp = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
                 val_err.append(F.mse_loss(yp, y.to(self.device)).item())
 
             if (e + 1) % log_epochs == 0:
@@ -297,17 +294,12 @@ class SimPLeLearner:
         # construct observation model input
         state = episodes["state"][:, 0, self.state_size]
         term_signal = episodes["terminated"][:, 0, :]
-
-        # optionally append last action
-        if self.args.obs_model_include_last_action:
-            last_action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1))
-            x = torch.cat((state, last_action, term_signal), dim=-1)
-        else:
-            x = torch.cat((state, term_signal), dim=-1)
+        action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1))
+        obs_t = self.run_obs_model(state, action, term_signal)
 
         # generate fist observation
         # TODO: check what device x is on
-        obs = self.obs_model(x.to(self.device))
+        #obs = self.obs_model(x.to(self.device))
 
 
 

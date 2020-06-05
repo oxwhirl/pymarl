@@ -36,7 +36,7 @@ state_model_grad_clip_norm: 1
 state_model_hidden_dim: 64
 
 # environment observation model learning
-obs_model_train_epochs: 50
+obs_model_train_epochs: 100
 obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 32
 obs_model_learning_rate: 0.01

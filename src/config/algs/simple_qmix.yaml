@@ -20,15 +20,29 @@ mixing_embed_dim: 32
 hypernet_layers: 2
 hypernet_embed: 64
 
-# environment model learning
+# model learning
 model_learner: "simple_learner"
-model_train_epochs: 50
-model_train_log_epochs: 10
-model_train_batch_size: 32
-model_learning_rate: 0.01
-model_grad_clip_norm: 10
-model_buffer_size: 256
-model_policy_steps: 10
-model_hidden_dim: 64
+model_policy_improvement_steps: 10
+
+# environment state model learning
+state_model_train_epochs: 50
+state_model_train_log_epochs: 10
+state_model_train_batch_size: 32
+state_model_learning_rate: 0.01
+state_model_grad_clip_norm: 1
+state_model_hidden_dim: 64
+
+# environment observation model learning
+obs_model_train_epochs: 100
+obs_model_train_log_epochs: 10
+obs_model_train_batch_size: 32
+obs_model_learning_rate: 0.01
+obs_model_grad_clip_norm: 1
+obs_model_hidden_dim: 128
+
+# this is independent from to env_args["obs_last_action"] and is used to improve state to obs modelling and is
+# always available during centralised training
+obs_model_include_last_action: True
+obs_model_use_mask: True # there are no obs after termination so may as well exclude learning those timesteps
 
 name: "simple_qmix"

@@ -101,10 +101,11 @@ class SimPLeLearner:
         y = y[:, 1:, :]
         return s, a, y
 
-    def run_state_model(self, state, action):
+    def run_state_model(self, state, action, ht_ct=None):
 
         bs, steps, state_size = state.size()
-        ht_ct = self.state_model.init_hidden(bs, self.device)
+        if not ht_ct:
+            ht_ct = self.state_model.init_hidden(bs, self.device)
         yp = torch.zeros(bs, steps, self.state_model_output_size).to(self.device)
 
         st = state[:, 0, :]  # initial state
@@ -116,7 +117,7 @@ class SimPLeLearner:
             yp[:, t, :] = yt
 
             st = yt[:, :state_size]
-        return yp
+        return yp, ht_ct
 
     def train_state_model(self, train_episodes, test_episodes):
         # model learning parameters
@@ -139,7 +140,7 @@ class SimPLeLearner:
 
             props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
             state, action, y = self.get_state_model_input_output(*props)
-            yp = self.run_state_model(state.to(self.device), action.to(self.device))
+            yp, _ = self.run_state_model(state.to(self.device), action.to(self.device))
             optimizer.zero_grad()
             loss = F.mse_loss(yp, y.to(self.device))
             loss.backward()
@@ -153,7 +154,7 @@ class SimPLeLearner:
 
                 props = self.get_batch(test_episodes, batch_size, use_mask=use_mask)
                 state, action, y = self.get_state_model_input_output(*props)
-                yp = self.run_state_model(state.to(self.device), action.to(self.device))
+                yp, _ = self.run_state_model(state.to(self.device), action.to(self.device))
                 val_err.append(F.mse_loss(yp, y.to(self.device)).item())
 
             if (e + 1) % log_epochs == 0:
@@ -175,9 +176,10 @@ class SimPLeLearner:
         y = torch.cat((obs, aa), dim=-1)
         return state, action, term_signal, y
 
-    def run_obs_model(self, state, last_action, term_signal):
+    def run_obs_model(self, state, last_action, term_signal, ht_ct=None):
         bs, steps, state_size = state.size()
-        ht_ct = self.obs_model.init_hidden(bs, self.device)
+        if not ht_ct:
+            ht_ct = self.obs_model.init_hidden(bs, self.device)
         yp = torch.zeros(bs, steps, self.obs_model_output_size).to(self.device)
 
         for t in range(0, steps):
@@ -194,7 +196,7 @@ class SimPLeLearner:
             yt, ht_ct = self.obs_model(xt, ht_ct)
             yp[:, t, :] = yt
 
-        return yp
+        return yp, ht_ct
 
     def train_obs_model(self, train_episodes, test_episodes):
         # observation model training
@@ -220,7 +222,7 @@ class SimPLeLearner:
             with torch.no_grad():
                 props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
                 r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
-                m_state = self.run_state_model(r_state.to(self.device), action.to(self.device))
+                m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
                 m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
 
                 # prepend first real state to model generated states
@@ -229,7 +231,7 @@ class SimPLeLearner:
 
             # generate obs from states
             self.obs_model.train()
-            yp = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
+            yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
 
             # train obs model
             optimizer.zero_grad()
@@ -243,7 +245,7 @@ class SimPLeLearner:
             with torch.no_grad():
                 props = self.get_batch(test_episodes, batch_size, use_mask=use_mask)
                 r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
-                m_state = self.run_state_model(r_state.to(self.device), action.to(self.device))
+                m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
                 m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
 
                 # prepend first real state to model generated states
@@ -252,7 +254,7 @@ class SimPLeLearner:
 
                 # generate obs from states
                 self.obs_model.eval()
-                yp = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
+                yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
                 val_err.append(F.mse_loss(yp, y.to(self.device)).item())
 
             if (e + 1) % log_epochs == 0:

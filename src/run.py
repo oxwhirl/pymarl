@@ -120,8 +120,12 @@ def run_sequential(args, logger):
 
     # Model learner
     model_learner = None
+    model_buffer = None
     if args.model_learner:
-        model_learner = le_REGISTRY[args.model_learner](mac, buffer.scheme, logger, args)
+        model_learner = le_REGISTRY[args.model_learner](mac, scheme, logger, args)
+        model_buffer = ReplayBuffer(scheme, groups, args.model_buffer_size, buffer.max_seq_length,
+                          device="cpu" if args.buffer_cpu_only else args.device,
+                          save_episodes=False)
 
     if args.use_cuda:
         learner.cuda()
@@ -193,8 +197,9 @@ def run_sequential(args, logger):
                 # supervised training of state and observation models
                 model_learner.train(buffer)
 
-                # generate buffer of synthetic episodes from real starts and the multi-agent controller
-                #model_episodes = model_learner.generate_episodes(buffer, args.model_rollouts) # of type ReplayBuffer
+                # generate buffer of synthetic episodes from real starts using current policy
+                model_episode_batch = model_learner.generate_batch(buffer)
+                model_buffer.insert_episode_batch(model_episode_batch)
 
 
                 # # perform several iterations of policy improvement using synthetic episodes

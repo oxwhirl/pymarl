@@ -4,12 +4,13 @@ import torch.nn.functional as F
 from modules.models.simple import SimPLeModel
 import numpy as np
 import random
+from components.episode_buffer import EpisodeBatch
+from functools import partial
 
 class SimPLeLearner:
     def __init__(self, mac, scheme, logger, args):
 
         self.mac = mac
-        self.params = list(mac.parameters())
         self.args = args
         self.logger = logger
         self.device = self.args.device
@@ -28,7 +29,9 @@ class SimPLeLearner:
         self.obs_model_input_size = self.state_size + self.term_size
         if args.obs_model_include_last_action:
             self.obs_model_input_size += self.action_size
-        self.obs_model_output_size = self.args.n_agents * (scheme["avail_actions"]["vshape"][0] + scheme["obs"]["vshape"])
+
+        self.agent_obs_size = scheme["obs"]["vshape"]
+        self.obs_model_output_size = self.args.n_agents * (args.n_actions + self.agent_obs_size)
         self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
 
     def train_test_split(self, indices, test_ratio=0.1, shuffle=True):
@@ -267,48 +270,76 @@ class SimPLeLearner:
                 train_err = []
                 val_err = []
 
-    def train(self, episode_buffer):
+    def train(self, buffer):
 
-        print(f"Training with {episode_buffer.episodes_in_buffer} episodes")
+        print(f"Training with {buffer.episodes_in_buffer} episodes")
         print(f"Model Training ...")
 
         # generate training and test episode indices
-        indices = list(range(0, episode_buffer.episodes_in_buffer))
+        indices = list(range(0, buffer.episodes_in_buffer))
         train_indices, test_indices = self.train_test_split(indices, test_ratio=self.args.model_training_test_ratio, shuffle=True)
 
         # extract episodes
-        train_episodes = [self.get_episode_vars(episode_buffer[i]) for i in train_indices]
-        test_episodes = [self.get_episode_vars(episode_buffer[i]) for i in train_indices]
+        train_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
+        test_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
 
         self.train_state_model(train_episodes, test_episodes)
         self.train_obs_model(train_episodes, test_episodes)
 
-    def generate_episodes(self, episode_buffer, n_rollouts):
+    def generate_batch(self, buffer):
 
         self.state_model.eval()
         self.obs_model.eval()
 
         # sample real starts from the replay buffer
         self.logger.console_logger.info("Generating model based episodes")
-        batch_size = min(episode_buffer.episodes_in_buffer, self.args.model_rollout_batch_size)
-        episodes = episode_buffer.sample(batch_size)
+        batch_size = min(buffer.episodes_in_buffer, self.args.model_rollout_batch_size)
+        episodes = buffer.sample(batch_size)
+
+        # create new episode batch for generated episodes
+        scheme = buffer.scheme.copy()
+        scheme.pop("filled", None)  # buffer scheme excluding filled key
+        batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length, device=self.device)()
 
         # construct observation model input
-        state = episodes["state"][:, 0, self.state_size]
-        term_signal = episodes["terminated"][:, 0, :]
-        action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1))
-        obs_t = self.run_obs_model(state, action, term_signal)
+        state = torch.unsqueeze(episodes["state"][:, 0, :self.state_size], 1).to(self.device)
+        term_signal = torch.unsqueeze(episodes["terminated"][:, 0, :], 1).float().to(self.device)
+        last_action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1)).to(self.device)
+        obs_size = self.args.n_agents * self.agent_obs_size
 
-        # generate fist observation
-        # TODO: check what device x is on
-        #obs = self.obs_model(x.to(self.device))
+        # initialise hidden states
+        o_ht_ct = None # obs model hidden states
+        s_ht_ct = None # state model hidden states
+        self.mac.init_hidden(batch_size=batch_size)
+
+        # generate episode sequence
+        for t in range(1):
+
+            # generate obs from state
+            obs, o_ht_ct = self.run_obs_model(state, last_action, term_signal, ht_ct=o_ht_ct)
+
+            batch_state = state
+            if self.args.env_args["state_last_action"]:
+                batch_state = torch.cat((state, last_action), dim=-1)
+            batch_obs = obs[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
+            batch_avail_actions = obs[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
+
+            # threshold avail_actions
+            threshold = 0.5
+            batch_avail_actions = (batch_avail_actions > threshold).float()
+
+            pre_transition_data = {
+                "state": batch_state,
+                "avail_actions": batch_avail_actions,
+                "obs": batch_obs
+            }
+            batch.update(pre_transition_data, bs=slice(batch_size), ts=t)
+
+            # generate actions following current policy
+            actions = self.mac.select_actions(batch, t_ep=t, t_env=t, bs=slice(batch_size))
 
 
 
-
-
-
-        # generate rollout from real start and current policy
 
     def cuda(self):
         self.state_model.cuda()

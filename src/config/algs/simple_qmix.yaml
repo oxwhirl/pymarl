@@ -22,8 +22,8 @@ hypernet_embed: 64
 
 # model learning
 model_learner: "simple_learner"
-model_rollout_batch_size: 32 # batch of real starts sampled from replay buffer
-model_rollouts: 256 # number of synthetic rollouts to generate
+model_rollout_batch_size: 32 # batch of rollouts to add to model_buffer
+model_buffer_size: 5000
 model_policy_improvement_steps: 10
 model_training_test_ratio: 0.1
 

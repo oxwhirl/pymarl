@@ -6,6 +6,7 @@ import numpy as np
 import random
 from components.episode_buffer import EpisodeBatch
 from functools import partial
+from components.transforms import OneHot
 
 class SimPLeLearner:
     def __init__(self, mac, scheme, logger, args):
@@ -46,12 +47,12 @@ class SimPLeLearner:
 
         return train_indices, test_indices
 
-    def get_episode_vars(self, ep):
+    def get_training_episode_vars(self, ep):
 
         # per-agent quantities
-        obs = ep["obs"][:, :-1, :]  # observations
-        aa = ep["avail_actions"][:, :-1, :].float()  # available actions
-        action = ep["actions_onehot"][:, :-1, :]  # actions taken
+        obs = ep["obs"][:, :-1, ...]  # observations
+        aa = ep["avail_actions"][:, :-1, ...].float()  # available actions
+        action = ep["actions_onehot"][:, :-1, ...]  # actions taken
 
         # flatten per-agent quantities
         nbatch, ntimesteps, _, _ = obs.size()
@@ -280,8 +281,8 @@ class SimPLeLearner:
         train_indices, test_indices = self.train_test_split(indices, test_ratio=self.args.model_training_test_ratio, shuffle=True)
 
         # extract episodes
-        train_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
-        test_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
+        train_episodes = [self.get_training_episode_vars(buffer[i]) for i in train_indices]
+        test_episodes = [self.get_training_episode_vars(buffer[i]) for i in train_indices]
 
         self.train_state_model(train_episodes, test_episodes)
         self.train_obs_model(train_episodes, test_episodes)
@@ -299,12 +300,14 @@ class SimPLeLearner:
         # create new episode batch for generated episodes
         scheme = buffer.scheme.copy()
         scheme.pop("filled", None)  # buffer scheme excluding filled key
-        batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length, device=self.device)()
+        batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length,
+                        preprocess=buffer.preprocess, device=self.device)()
 
         # construct observation model input
-        state = torch.unsqueeze(episodes["state"][:, 0, :self.state_size], 1).to(self.device)
-        term_signal = torch.unsqueeze(episodes["terminated"][:, 0, :], 1).float().to(self.device)
-        last_action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1)).to(self.device)
+        state = episodes["state"][:, 0, :self.state_size].unsqueeze(1).to(self.device)
+        term_signal = episodes["terminated"][:, 0, :].unsqueeze(1).float().to(self.device)
+        terminated = (term_signal > 0)
+        action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1)).to(self.device)
         obs_size = self.args.n_agents * self.agent_obs_size
 
         # initialise hidden states
@@ -313,30 +316,63 @@ class SimPLeLearner:
         self.mac.init_hidden(batch_size=batch_size)
 
         # generate episode sequence
-        for t in range(1):
+        for t in range(batch.max_seq_length):
+
+            # update active episodes
+            active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
+            if all(terminated):
+                break
 
             # generate obs from state
-            obs, o_ht_ct = self.run_obs_model(state, last_action, term_signal, ht_ct=o_ht_ct)
+            output, o_ht_ct = self.run_obs_model(state, action, term_signal, ht_ct=o_ht_ct)
 
             batch_state = state
             if self.args.env_args["state_last_action"]:
-                batch_state = torch.cat((state, last_action), dim=-1)
-            batch_obs = obs[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
-            batch_avail_actions = obs[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
+                batch_state = torch.cat((state, action), dim=-1)
+            obs = output[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
+            avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
 
             # threshold avail_actions
-            threshold = 0.5
-            batch_avail_actions = (batch_avail_actions > threshold).float()
+            #threshold = 0.5
+            #avail_actions = (avail_actions > threshold).float()
+            avail_actions[avail_actions < 0] = 0 # clip
+            avail_actions[:, :, :, 1] = 1 # stop action is always available
 
             pre_transition_data = {
-                "state": batch_state,
-                "avail_actions": batch_avail_actions,
-                "obs": batch_obs
+                "state": batch_state[active_episodes],
+                "avail_actions": avail_actions[active_episodes],
+                "obs": obs[active_episodes]
             }
-            batch.update(pre_transition_data, bs=slice(batch_size), ts=t)
+            batch.update(pre_transition_data, bs=active_episodes, ts=t)
 
             # generate actions following current policy
-            actions = self.mac.select_actions(batch, t_ep=t, t_env=t, bs=slice(batch_size))
+            action = self.mac.select_actions(batch, t_ep=t, t_env=t, bs=active_episodes).unsqueeze(1)
+            batch.update({"actions": action}, bs=active_episodes, ts=t) # this will generate actions_onehot
+            action = batch["actions_onehot"][:, -1, ...].view(batch_size, 1, -1)  # latest action
+
+            # generate next state, reward and termination signal
+            output, s_ht_ct = self.run_state_model(state, action, ht_ct=s_ht_ct)
+            state = output[:, :, :self.state_size]; idx = self.state_size
+            reward = output[:, :, idx:idx + self.reward_size]; idx += self.reward_size
+            term_signal = output[:, :, idx:idx + self.term_size]
+
+            # generate termination mask
+            threshold = 0.9
+            terminated = (term_signal > threshold)
+
+            post_transition_data = {
+                "reward": reward[active_episodes],
+                "terminated": terminated[active_episodes]
+            }
+            batch.update(post_transition_data, ts=t, bs=active_episodes)
+
+        return batch
+
+
+
+
+
+
 
 
 

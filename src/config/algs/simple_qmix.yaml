@@ -28,7 +28,7 @@ model_policy_improvement_steps: 10
 model_training_test_ratio: 0.1
 
 # environment state model learning
-state_model_train_epochs: 50
+state_model_train_epochs: 10 # 50
 state_model_train_log_epochs: 10
 state_model_train_batch_size: 32
 state_model_learning_rate: 0.01
@@ -36,7 +36,7 @@ state_model_grad_clip_norm: 1
 state_model_hidden_dim: 64
 
 # environment observation model learning
-obs_model_train_epochs: 100
+obs_model_train_epochs: 10 # 100
 obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 32
 obs_model_learning_rate: 0.01
@@ -49,3 +49,4 @@ obs_model_include_last_action: True
 obs_model_use_mask: True # there are no obs after termination so may as well exclude learning those timesteps
 
 name: "simple_qmix"
+use_cuda: False

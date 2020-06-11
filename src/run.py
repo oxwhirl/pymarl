@@ -124,6 +124,7 @@ def run_sequential(args, logger):
     if args.model_learner:
         model_learner = le_REGISTRY[args.model_learner](mac, scheme, logger, args)
         model_buffer = ReplayBuffer(scheme, groups, args.model_buffer_size, buffer.max_seq_length,
+                          preprocess=preprocess,
                           device="cpu" if args.buffer_cpu_only else args.device,
                           save_episodes=False)
 

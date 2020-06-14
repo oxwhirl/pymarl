@@ -7,11 +7,13 @@ class DecayThenFlatSchedule():
                  start,
                  finish,
                  time_length,
+                 delay=0,
                  decay="exp"):
 
         self.start = start
         self.finish = finish
         self.time_length = time_length
+        self.delay = delay
         self.delta = (self.start - self.finish) / self.time_length
         self.decay = decay
 
@@ -19,6 +21,9 @@ class DecayThenFlatSchedule():
             self.exp_scaling = (-1) * self.time_length / np.log(self.finish) if self.finish > 0 else 1
 
     def eval(self, T):
+
+        T = max(0, T - self.delay)
+
         if self.decay in ["linear"]:
             return max(self.finish, self.start - self.delta * T)
         elif self.decay in ["exp"]:

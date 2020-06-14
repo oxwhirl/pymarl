@@ -15,6 +15,7 @@ from controllers import REGISTRY as mac_REGISTRY
 from components.episode_buffer import ReplayBuffer
 from components.transforms import OneHot
 
+import pickle
 
 def run(_run, _config, _log):
 
@@ -62,7 +63,6 @@ def run(_run, _config, _log):
     # Making sure framework really exits
     os._exit(os.EX_OK)
 
-
 def evaluate_sequential(args, runner):
 
     for _ in range(args.test_nepisode):
@@ -74,7 +74,6 @@ def evaluate_sequential(args, runner):
     runner.close_env()
 
 def run_sequential(args, logger):
-
     # Init runner so we can get env info
     runner = r_REGISTRY[args.runner](args=args, logger=logger)
 
@@ -106,8 +105,7 @@ def run_sequential(args, logger):
                           device="cpu" if args.buffer_cpu_only else args.device,
                           save_episodes=True if args.save_episodes else False,
                           episode_dir=args.episode_dir,
-                          clear_existing_episodes=args.clear_existing_episodes) # TODO maybe just pass args
-
+                          clear_existing_episodes=args.clear_existing_episodes)  # TODO maybe just pass args
 
     # Setup multiagent controller here
     mac = mac_REGISTRY[args.mac](buffer.scheme, groups, args)
@@ -124,9 +122,9 @@ def run_sequential(args, logger):
     if args.model_learner:
         model_learner = le_REGISTRY[args.model_learner](mac, scheme, logger, args)
         model_buffer = ReplayBuffer(scheme, groups, args.model_buffer_size, buffer.max_seq_length,
-                          preprocess=preprocess,
-                          device="cpu" if args.buffer_cpu_only else args.device,
-                          save_episodes=False)
+                                    preprocess=preprocess,
+                                    device="cpu" if args.buffer_cpu_only else args.device,
+                                    save_episodes=False)
 
     if args.use_cuda:
         learner.cuda()
@@ -166,8 +164,7 @@ def run_sequential(args, logger):
             evaluate_sequential(args, runner)
             return
 
-        #TODO checkpoints for model_learner
-
+        # TODO checkpoints for model_learner
 
     # start training
     episode = 0
@@ -178,55 +175,97 @@ def run_sequential(args, logger):
     start_time = time.time()
     last_time = start_time
 
+    # model based learning stuff
+    model_episode = 0
+    model_based_learning_iterations = 0
+    model_based_learning_step = 0
+
+    save_buffer = False
+    load_buffer = False
+    force_save = False
+    buffer_file = f"buffers/buffer_episode_{args.model_buffer_min_samples}.pkl"
+    buffer_saved = False
+
     logger.console_logger.info("Beginning training for {} timesteps".format(args.t_max))
+
+    if load_buffer and os.path.exists(buffer_file):
+        with open(buffer_file, 'rb') as f:
+            buffer, runner.t_env = pickle.load(f)
+            print(f"Loaded buffer {buffer_file} at t_env {runner.t_env}")
 
     while runner.t_env <= args.t_max:
 
         # Run for a whole episode at a time
-        episode_batch = runner.run(test_mode=False)
+        #episode_batch = runner.run(test_mode=False, t_env_offset=model_based_learning_step)
+        episode_batch = runner.run(test_mode=False, t_env_offset=0)
         buffer.insert_episode_batch(episode_batch)
 
         if buffer.can_sample(args.batch_size):
 
-            # # save the buffer
-            # import pickle
-            # with open(f"buffers/buffer_{runner.t_env}.pkl", 'wb') as f:
-            #     pickle.dump(buffer, f)
-
             if model_learner:
 
-                # supervised training of state and observation models
-                model_learner.train(buffer)
+                if buffer.episodes_in_buffer >= args.model_buffer_min_samples:
 
-                # generate buffer of synthetic episodes from real starts using current policy
-                model_episode_batch = model_learner.generate_batch(buffer)
-                model_buffer.insert_episode_batch(model_episode_batch)
+                    # supervised training of state and observation models
+                    if save_buffer and not buffer_saved:
+                        if not os.path.exists(buffer_file) or force_save:
+                            # save the buffer
+                            with open(buffer_file, 'wb') as f:
+                                pickle.dump((buffer, runner.t_env), f)
+                                buffer_saved = True
+                                print(f"Saved buffer {buffer_file}")
 
+                    model_learner.train(buffer, plot_test_results=True)
+                    # generate buffer of synthetic episodes from real starts using current policy
+                    with th.no_grad():
+                        # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
+                        model_batch = model_learner.generate_batch(buffer, runner.t_env)
+                    model_buffer.insert_episode_batch(model_batch)
 
-                # # perform several iterations of policy improvement using synthetic episodes
-                # for i in range(args.model_policy_steps):
-                #     episode_sample = model_episodes.sample(args.batch_size)
-                #
-                #     # Truncate batch to only filled timesteps
-                #     max_ep_t = episode_sample.max_t_filled()
-                #     episode_sample = episode_sample[:, :max_ep_t]
-                #
-                #     if episode_sample.device != args.device:
-                #         episode_sample.to(args.device)
-                #
-                #     learner.train(episode_sample, runner.t_env, episode)
-            #else:
+                    for i in range(args.model_policy_improvement_steps):
 
-            episode_sample = buffer.sample(args.batch_size)
+                        # improve policy
+                        if model_buffer.can_sample(args.batch_size):
 
-            # Truncate batch to only filled timesteps
-            max_ep_t = episode_sample.max_t_filled()
-            episode_sample = episode_sample[:, :max_ep_t]
+                            # sample episode batch from the model replay buffer
+                            model_episode_sample = model_buffer.sample(args.batch_size)
 
-            if episode_sample.device != args.device:
-                episode_sample.to(args.device)
+                            # truncate batch to only filled timesteps
+                            # max_ep_t = model_episode_sample.max_t_filled()
+                            # model_episode_sample = model_episode_sample[:, :max_ep_t]
 
-            learner.train(episode_sample, runner.t_env, episode)
+                            if model_episode_sample.device != args.device:
+                                model_episode_sample.to(args.device)
+
+                            # train RL agent
+                            #learner.train(model_episode_sample, runner.t_env + model_based_learning_step,
+                            #              model_episode)
+                            learner.train(model_episode_sample, runner.t_env, model_episode)
+                            #learner.train(model_episode_sample, runner.t_env, model_based_learning_iterations)
+                            model_based_learning_iterations += 1
+                            model_episode += args.batch_size
+
+                            # Execute test runs once in a while
+                            n_test_runs = max(1, args.test_nepisode // runner.batch_size)
+                            if model_based_learning_iterations % args.model_policy_test_interval == 0:
+                                print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
+                                for _ in range(n_test_runs):
+                                    #runner.run(test_mode=True, t_env_offset=model_based_learning_step)
+                                    runner.run(test_mode=True, t_env_offset=0)
+                                    logger.print_recent_stats()
+                    model_based_learning_step += 1
+
+            else:
+                episode_sample = buffer.sample(args.batch_size)
+
+                # Truncate batch to only filled timesteps
+                max_ep_t = episode_sample.max_t_filled()
+                episode_sample = episode_sample[:, :max_ep_t]
+
+                if episode_sample.device != args.device:
+                    episode_sample.to(args.device)
+
+                learner.train(episode_sample, runner.t_env, episode)
 
         # Execute test runs once in a while
         n_test_runs = max(1, args.test_nepisode // runner.batch_size)
@@ -244,7 +283,7 @@ def run_sequential(args, logger):
         if args.save_model and (runner.t_env - model_save_time >= args.save_model_interval or model_save_time == 0):
             model_save_time = runner.t_env
             save_path = os.path.join(args.local_results_path, "models", args.unique_token, str(runner.t_env))
-            #"results/models/{}".format(unique_token)
+            # "results/models/{}".format(unique_token)
             os.makedirs(save_path, exist_ok=True)
             logger.console_logger.info("Saving models to {}".format(save_path))
 
@@ -261,7 +300,6 @@ def run_sequential(args, logger):
 
     runner.close_env()
     logger.console_logger.info("Finished Training")
-
 
 def args_sanity_check(config, _log):
 

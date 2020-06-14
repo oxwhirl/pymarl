@@ -35,6 +35,7 @@ class QLearner:
         self.log_stats_t = -self.args.learner_log_interval - 1
 
     def train(self, batch: EpisodeBatch, t_env: int, episode_num: int):
+
         # Get the relevant quantities
         rewards = batch["reward"][:, :-1]
         actions = batch["actions"][:, :-1]
@@ -60,7 +61,6 @@ class QLearner:
         for t in range(batch.max_seq_length):
             target_agent_outs = self.target_mac.forward(batch, t=t)
             target_mac_out.append(target_agent_outs)
-
         # We don't need the first timesteps Q-Value estimate for calculating targets
         target_mac_out = th.stack(target_mac_out[1:], dim=1)  # Concat across time
 

@@ -6,7 +6,11 @@ import numpy as np
 import random
 from components.episode_buffer import EpisodeBatch
 from functools import partial
-from components.transforms import OneHot
+from envs import REGISTRY as env_REGISTRY
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import os
 
 class SimPLeLearner:
     def __init__(self, mac, scheme, logger, args):
@@ -15,6 +19,9 @@ class SimPLeLearner:
         self.args = args
         self.logger = logger
         self.device = self.args.device
+
+        # used to get env metadata
+        self.env = env_REGISTRY[self.args.env](**self.args.env_args)
 
         self.action_size = args.n_actions * args.n_agents
         self.state_size = args.state_shape - self.action_size if args.env_args["state_last_action"] else args.state_shape
@@ -34,6 +41,78 @@ class SimPLeLearner:
         self.agent_obs_size = scheme["obs"]["vshape"]
         self.obs_model_output_size = self.args.n_agents * (args.n_actions + self.agent_obs_size)
         self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
+
+        # meta
+        self.training_iterations = 0
+
+    def get_state_scheme(self, other_features=False, custom_features=False):
+
+        nf_ally, nf_enemy, nf_other, nf_custom, scheme_ally, scheme_enemy, scheme_other, scheme_custom = self._build_state_scheme()
+
+        scheme = {}
+        for a in range(self.env.n_agents):
+            for k, v in scheme_ally.items():
+                idx = a * nf_ally + v
+                name = f"ally_{a}_{k}"
+                scheme[name] = idx
+
+        for a in range(self.env.n_enemies):
+            for k, v in scheme_enemy.items():
+                idx = self.env.n_agents * nf_ally + a * nf_enemy + v
+                name = f"enemy_{a}_{k}"
+                scheme[name] = idx
+
+        if other_features:
+            for k, v in scheme_other.items():
+                idx = self.env.n_agents * nf_ally + self.env.n_enemies * nf_enemy + v
+                scheme[k] = idx
+
+        if custom_features:
+            n = len(scheme)
+            for k, v in scheme_custom.items():
+                idx = n + v
+                scheme[k] = idx
+
+        return scheme
+
+    def _build_state_scheme(self):
+
+        nf_ally = 4 + self.env.shield_bits_ally + self.env.unit_type_bits
+        nf_enemy = 3 + self.env.shield_bits_enemy + self.env.unit_type_bits
+
+        # allies
+        ally_scheme = {"health": 0, "cooldown": 1, "x": 2, "y": 3}
+        idx = 4
+        if self.env.shield_bits_ally > 0:
+            ally_scheme["ally_shield"] = idx; idx += 1
+        if self.env.unit_type_bits > 0:
+            ally_scheme["ally_type"] = idx; idx += 1
+
+        # enemies
+        enemy_scheme = {"health": 0, "x": 1, "y": 2}
+        idx = 3
+        if self.env.shield_bits_enemy > 0:
+            enemy_scheme["shield"] = idx; idx += 1
+        if self.env.unit_type_bits > 0:
+            enemy_scheme["type"] = idx;
+
+        # other
+        nf_other = 0
+        other_scheme = {}
+        if self.env.state_last_action:
+            nf_other = self.env.n_agents * self.env.n_actions
+            for i in range(self.env.n_agents):
+                for j in range(self.env.n_actions):
+                    other_scheme[f"agent_{i}_action_{j}"] = i * self.env.n_actions + j
+        if self.env.state_timestep_number:
+            nf_other += 1
+            other_scheme["timestep"] = len(other_scheme) + 1
+
+        # custom
+        nf_custom = 2
+        custom_scheme = {"reward": 0, "term_signal": 1}
+
+        return nf_ally, nf_enemy, nf_other, nf_custom, ally_scheme, enemy_scheme, other_scheme, custom_scheme
 
     def train_test_split(self, indices, test_ratio=0.1, shuffle=True):
 
@@ -98,11 +177,17 @@ class SimPLeLearner:
         return props
 
     def get_state_model_input_output(self, state, action, reward, term_signal, obs, aa, mask):
-        # inputs and outputs are offset by 1 timestep for 1-step-ahead prediction
-        s = state[:, :-1, :]
-        a = action[:, :-1, :]
-        y = torch.cat((state, reward, term_signal), dim=-1)
-        y = y[:, 1:, :]
+
+        # inputs
+        s = state[:, :-1, :]  # state at time t
+        a = action[:, :-1, :]  # joint action at time t
+
+        # outputs
+        ns = state[:, 1:, :]  # state at time t+1
+        r = reward[:, :-1, :]  # reward at time t+1
+        T = term_signal[:, :-1, :]  # terminated at t+1
+
+        y = torch.cat((ns, r, T), dim=-1)
         return s, a, y
 
     def run_state_model(self, state, action, ht_ct=None):
@@ -124,6 +209,8 @@ class SimPLeLearner:
         return yp, ht_ct
 
     def train_state_model(self, train_episodes, test_episodes):
+
+        print(f"State Model Training ...")
         # model learning parameters
         lr = self.args.state_model_learning_rate
         grad_clip = self.args.state_model_grad_clip_norm
@@ -271,10 +358,38 @@ class SimPLeLearner:
                 train_err = []
                 val_err = []
 
-    def train(self, buffer):
+    def plot_test_results(self, test_episodes, plot_dir):
+
+        batch_size = self.args.state_model_train_batch_size
+        batch_size = min(batch_size, len(test_episodes))
+
+        # get state model results
+        self.state_model.eval()
+        with torch.no_grad():
+            props = self.get_batch(test_episodes, batch_size, use_mask=False)
+            state, actions, y = self.get_state_model_input_output(*props)
+            yp, _ = self.run_state_model(state.to(self.args.device), actions.to(self.args.device))
+            #err = F.mse_loss(yp, y.to(self.args.device)).item()
+            #print(f"val error: {err:.5f}")
+
+        y = y.to('cpu')
+        yp = yp.to('cpu')
+
+        idx = random.choice(range(batch_size))
+        scheme = self.get_state_scheme(custom_features=True)
+
+        fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
+        for k, v in scheme.items():
+            i = scheme[k]
+            ax[i].plot(y[idx, :, i], label='actual')
+            ax[i].plot(yp[idx, :, i], label='predicted')
+            ax[i].set_title(k)
+        plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}.png"))
+        plt.close()
+
+    def train(self, buffer, plot_test_results=False, plot_dir="plots"):
 
         print(f"Training with {buffer.episodes_in_buffer} episodes")
-        print(f"Model Training ...")
 
         # generate training and test episode indices
         indices = list(range(0, buffer.episodes_in_buffer))
@@ -286,16 +401,20 @@ class SimPLeLearner:
 
         self.train_state_model(train_episodes, test_episodes)
         self.train_obs_model(train_episodes, test_episodes)
+        self.training_iterations += 1
 
-    def generate_batch(self, buffer):
+        if plot_test_results:
+            self.plot_test_results(test_episodes, plot_dir)
+
+    def generate_batch(self, buffer, t_env):
 
         self.state_model.eval()
         self.obs_model.eval()
 
         # sample real starts from the replay buffer
-        self.logger.console_logger.info("Generating model based episodes")
         batch_size = min(buffer.episodes_in_buffer, self.args.model_rollout_batch_size)
         episodes = buffer.sample(batch_size)
+        #self.logger.console_logger.info(f"Generating {batch_size} model based episodes")
 
         # create new episode batch for generated episodes
         scheme = buffer.scheme.copy()
@@ -333,10 +452,11 @@ class SimPLeLearner:
             avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
 
             # threshold avail_actions
-            #threshold = 0.5
-            #avail_actions = (avail_actions > threshold).float()
-            avail_actions[avail_actions < 0] = 0 # clip
+            threshold = 0.2
+            avail_actions = (avail_actions > threshold).float()
+            #avail_actions[avail_actions < 0] = 0 # clip, we assume the distribution approaches the correct one over time
             avail_actions[:, :, :, 1] = 1 # stop action is always available
+            #avail_actions[:, :, :, :] = 1  # all actions are available
 
             pre_transition_data = {
                 "state": batch_state[active_episodes],
@@ -346,7 +466,7 @@ class SimPLeLearner:
             batch.update(pre_transition_data, bs=active_episodes, ts=t)
 
             # generate actions following current policy
-            action = self.mac.select_actions(batch, t_ep=t, t_env=t, bs=active_episodes).unsqueeze(1)
+            action = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes).unsqueeze(1)
             batch.update({"actions": action}, bs=active_episodes, ts=t) # this will generate actions_onehot
             action = batch["actions_onehot"][:, -1, ...].view(batch_size, 1, -1)  # latest action
 
@@ -367,15 +487,6 @@ class SimPLeLearner:
             batch.update(post_transition_data, ts=t, bs=active_episodes)
 
         return batch
-
-
-
-
-
-
-
-
-
 
     def cuda(self):
         self.state_model.cuda()

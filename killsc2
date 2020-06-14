@@ -1,0 +1,7 @@
+#!/bin/bash
+
+for p in $(ps -ef | grep StarCraftII | grep -v grep | tr -s [:space:] | cut -f2 -d ' '); 
+    do echo killing $p; 
+    kill $p; 
+done
+

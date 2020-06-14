@@ -11,7 +11,7 @@ class MultinomialActionSelector():
         self.args = args
 
         self.schedule = DecayThenFlatSchedule(args.epsilon_start, args.epsilon_finish, args.epsilon_anneal_time,
-                                              decay="linear")
+                                              args.epsilon_delay, decay="linear")
         self.epsilon = self.schedule.eval(0)
         self.test_greedy = getattr(args, "test_greedy", True)
 
@@ -38,7 +38,7 @@ class EpsilonGreedyActionSelector():
         self.args = args
 
         self.schedule = DecayThenFlatSchedule(args.epsilon_start, args.epsilon_finish, args.epsilon_anneal_time,
-                                              decay="linear")
+                                              args.epsilon_delay, decay="linear")
         self.epsilon = self.schedule.eval(0)
 
     def select_action(self, agent_inputs, avail_actions, t_env, test_mode=False):

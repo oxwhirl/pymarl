@@ -5,10 +5,11 @@ action_selector: "epsilon_greedy"
 epsilon_start: 1.0
 epsilon_finish: 0.05
 epsilon_anneal_time: 50000
+epsilon_delay: 0 # start epsilon decay after initial samples have been collected
 
 buffer_size: 5000
 
-# update the target network every {} episodes
+# update the target network every n episodes
 target_update_interval: 200
 
 # use the Q_Learner to train
@@ -24,23 +25,25 @@ hypernet_embed: 64
 model_learner: "simple_learner"
 model_rollout_batch_size: 32 # batch of rollouts to add to model_buffer
 model_buffer_size: 5000
-model_policy_improvement_steps: 10
+model_buffer_min_samples: 32
+model_policy_improvement_steps: 1
+model_policy_test_interval: 1
 model_training_test_ratio: 0.1
 
 # environment state model learning
-state_model_train_epochs: 10 # 50
+state_model_train_epochs: 10
 state_model_train_log_epochs: 10
 state_model_train_batch_size: 32
 state_model_learning_rate: 0.01
-state_model_grad_clip_norm: 1
+state_model_grad_clip_norm: 10
 state_model_hidden_dim: 64
 
 # environment observation model learning
-obs_model_train_epochs: 10 # 100
+obs_model_train_epochs: 10
 obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 32
 obs_model_learning_rate: 0.01
-obs_model_grad_clip_norm: 1
+obs_model_grad_clip_norm: 10
 obs_model_hidden_dim: 128
 
 # this is independent from to env_args["obs_last_action"] and is used to improve state to obs modelling and is
@@ -49,4 +52,22 @@ obs_model_include_last_action: True
 obs_model_use_mask: True # there are no obs after termination so may as well exclude learning those timesteps
 
 name: "simple_qmix"
-use_cuda: False
+use_cuda: True
+
+runner: "parallel"
+batch_size_run: 32 # Number of environments to run in parallel
+batch_size: 32
+
+test_greedy: True
+test_nepisode: 32
+test_interval: 10000
+log_interval: 1000
+runner_log_interval: 1000
+learner_log_interval: 32
+t_max: 2050000
+
+save_episodes: False
+episode_dir: episodes
+clear_existing_episodes: False
+
+save_model: False

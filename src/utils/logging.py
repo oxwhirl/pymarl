@@ -39,18 +39,19 @@ class Logger:
                 self.sacred_info[key] = [value]
 
     def print_recent_stats(self):
-        log_str = "Recent Stats | t_env: {:>10} | Episode: {:>8}\n".format(*self.stats["episode"][-1])
-        i = 0
-        for (k, v) in sorted(self.stats.items()):
-            if k == "episode":
-                continue
-            i += 1
-            window = 5 if k != "epsilon" else 1
+        if len(self.stats["episode"]) > 0:
+            log_str = "Recent Stats | t_env: {:>10} | Episode: {:>8}\n".format(*self.stats["episode"][-1])
+            i = 0
+            for (k, v) in sorted(self.stats.items()):
+                if k == "episode":
+                    continue
+                i += 1
+                window = 5 if k != "epsilon" else 1
 
-            item = "{:.4f}".format(np.mean([x[1].item() if th.is_tensor(x[1]) else x[1] for x in self.stats[k][-window:]]))
-            log_str += "{:<25}{:>8}".format(k + ":", item)
-            log_str += "\n" if i % 4 == 0 else "\t"
-        self.console_logger.info(log_str)
+                item = "{:.4f}".format(np.mean([x[1].item() if th.is_tensor(x[1]) else x[1] for x in self.stats[k][-window:]]))
+                log_str += "{:<25}{:>8}".format(k + ":", item)
+                log_str += "\n" if i % 4 == 0 else "\t"
+            self.console_logger.info(log_str)
 
 
 # set up a custom logger

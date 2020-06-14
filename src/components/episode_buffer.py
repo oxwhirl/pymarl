@@ -217,14 +217,14 @@ class ReplayBuffer(EpisodeBatch):
         self.save_index = 0
         self.save_episodes = save_episodes
         self.save_dir = episode_dir
-        self.clear_existing_episodes = clear_existing_episodes
 
         if self.save_episodes:
             if self.save_dir:
                 if os.path.exists(self.save_dir):
-                    files = glob(os.path.join(self.save_dir, "episode_*.pkl"))
-                    for f in files:
-                        os.remove(f)
+                    if clear_existing_episodes:
+                        files = glob(os.path.join(self.save_dir, "episode_*.pkl"))
+                        for f in files:
+                            os.remove(f)
                 else:
                     os.mkdir(self.save_dir)
             else:

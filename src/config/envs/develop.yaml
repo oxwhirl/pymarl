@@ -45,4 +45,4 @@ t_max: 100000
 
 save_episodes: False
 episode_dir: episodes
-clear_existing_episodes: False
+clear_existing_episodes: True

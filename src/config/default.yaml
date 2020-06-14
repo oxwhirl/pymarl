@@ -15,6 +15,7 @@ learner_log_interval: 2000 # Log training stats every {} timesteps
 t_max: 10000 # Stop running after this many timesteps
 use_cuda: True # Use gpu by default unless it isn't available
 buffer_cpu_only: True # If true we won't keep all of the replay buffer in vram
+epsilon_delay: 0 # delay epsilon decay by this many timesteps
 
 # --- Logging options ---
 use_tensorboard: False # Log results to tensorboard

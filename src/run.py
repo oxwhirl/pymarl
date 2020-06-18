@@ -196,8 +196,7 @@ def run_sequential(args, logger):
     while runner.t_env <= args.t_max:
 
         # Run for a whole episode at a time
-        #episode_batch = runner.run(test_mode=False, t_env_offset=model_based_learning_step)
-        episode_batch = runner.run(test_mode=False, t_env_offset=0)
+        episode_batch = runner.run(test_mode=False)
         buffer.insert_episode_batch(episode_batch)
 
         if buffer.can_sample(args.batch_size):
@@ -238,10 +237,7 @@ def run_sequential(args, logger):
                                 model_episode_sample.to(args.device)
 
                             # train RL agent
-                            #learner.train(model_episode_sample, runner.t_env + model_based_learning_step,
-                            #              model_episode)
                             learner.train(model_episode_sample, runner.t_env, model_episode)
-                            #learner.train(model_episode_sample, runner.t_env, model_based_learning_iterations)
                             model_based_learning_iterations += 1
                             model_episode += args.batch_size
 
@@ -250,8 +246,7 @@ def run_sequential(args, logger):
                             if model_based_learning_iterations % args.model_policy_test_interval == 0:
                                 print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
                                 for _ in range(n_test_runs):
-                                    #runner.run(test_mode=True, t_env_offset=model_based_learning_step)
-                                    runner.run(test_mode=True, t_env_offset=0)
+                                    runner.run(test_mode=True)
                                     logger.print_recent_stats()
                     model_based_learning_step += 1
 

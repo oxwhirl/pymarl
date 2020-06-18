@@ -114,6 +114,82 @@ class SimPLeLearner:
 
         return nf_ally, nf_enemy, nf_other, nf_custom, ally_scheme, enemy_scheme, other_scheme, custom_scheme
 
+    def get_obs_scheme(self):
+        move_feats_dim = np.product(self.env.get_obs_move_feats_size())
+        enemy_feats_dim = np.product(self.env.get_obs_enemy_feats_size())
+        ally_feats_dim = np.product(self.env.get_obs_ally_feats_size())
+        own_feats_dim = np.product(self.env.get_obs_own_feats_size())
+
+        scheme = {}
+        fidx = -1
+        for a in range(self.env.n_agents):
+
+            # movement features
+            for d in ["NORTH", "SOUTH", "EAST", "WEST"]:
+                fname = f"agent_{a}_move_{d}"; fidx += 1; scheme[fname] = fidx
+
+            if self.env.obs_pathing_grid:
+                for i in range(self.env.n_obs_pathing):
+                    fname = f"agent_{a}_pathing_{i}"; fidx += 1; scheme[fname] = fidx
+
+            if self.env.obs_terrain_height:
+                idx = fidx
+                for i in range(idx, move_feats_dim):
+                    fname = f"agent_{a}_terrain_{i}"; fidx += 1; scheme[fname] = fidx
+
+                    # enemy features
+            for e in range(self.env.n_enemies):
+                fname = f"agent_{a}_enemy_{e}_in_range"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_enemy_{e}_distance"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_enemy_{e}_relative_x"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_enemy_{e}_relative_y"; fidx += 1; scheme[fname] = fidx
+
+                if self.env.obs_all_health:
+                    fname = f"agent_{a}_enemy_{e}_health"; fidx += 1; scheme[fname] = fidx
+                    if self.env.shield_bits_enemy > 0:
+                        fname = f"agent_{a}_enemy_{e}_shield"; fidx += 1; scheme[fname] = fidx
+
+                if self.env.unit_type_bits > 0:
+                    for i in range(self.env.unit_type_bits):
+                        fname = f"agent_{a}_enemy_{e}_type_{i}"; fidx += 1; scheme[fname] = fidx
+
+            # ally features
+            allies = [x for x in range(self.env.n_agents) if x != a]
+            for y in allies:
+                fname = f"agent_{a}_ally_{y}_visible"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_ally_{y}_distance"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_ally_{y}_relative_x"; fidx += 1; scheme[fname] = fidx
+                fname = f"agent_{a}_ally_{y}_relative_y"; fidx += 1; scheme[fname] = fidx
+
+                if self.env.obs_all_health:
+                    fname = f"agent_{a}_ally_{y}_health"; fidx += 1; scheme[fname] = fidx
+                    if self.env.shield_bits_ally > 0:
+                        fname = f"agent_{a}_ally_{y}_shield"; fidx += 1; scheme[fname] = fidx
+
+                if self.env.unit_type_bits > 0:
+                    for i in range(self.env.unit_type_bits):
+                        fname = f"agent_{a}_ally_{y}_type_{i}"; fidx += 1; scheme[fname] = fidx
+
+                if self.env.obs_last_action:
+                    fname = f"agent_{a}_ally_{y}_last_action"; fidx += 1; scheme[fname] = fidx
+
+            # own features
+            if self.env.obs_own_health:
+                fname = f"agent_{a}_health"; fidx += 1; scheme[fname] = fidx
+            if self.env.obs_timestep_number:
+                fname = f"timestep"; fidx += 1; scheme[fname] = fidx
+
+            if self.env.unit_type_bits > 0:
+                for i in range(self.env.unit_type_bits):
+                    fname = f"agent_{a}_type_{i}"; fidx += 1; scheme[fname] = fidx
+
+        # available actions
+        for i in range(self.env.n_agents):
+            for j in range(self.env.n_actions):
+                fname = f"agent_{i}_action_{j}_available"; fidx += 1; scheme[fname] = fidx
+
+        return scheme
+
     def train_test_split(self, indices, test_ratio=0.1, shuffle=True):
 
         if shuffle:
@@ -358,7 +434,7 @@ class SimPLeLearner:
                 train_err = []
                 val_err = []
 
-    def plot_test_results(self, test_episodes, plot_dir):
+    def plot_state_model(self, test_episodes, plot_dir):
 
         batch_size = self.args.state_model_train_batch_size
         batch_size = min(batch_size, len(test_episodes))
@@ -369,8 +445,6 @@ class SimPLeLearner:
             props = self.get_batch(test_episodes, batch_size, use_mask=False)
             state, actions, y = self.get_state_model_input_output(*props)
             yp, _ = self.run_state_model(state.to(self.args.device), actions.to(self.args.device))
-            #err = F.mse_loss(yp, y.to(self.args.device)).item()
-            #print(f"val error: {err:.5f}")
 
         y = y.to('cpu')
         yp = yp.to('cpu')
@@ -385,6 +459,42 @@ class SimPLeLearner:
             ax[i].plot(yp[idx, :, i], label='predicted')
             ax[i].set_title(k)
         plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}.png"))
+        plt.close()
+
+    def plot_obs_model(self, test_episodes, plot_dir):
+
+        batch_size = self.args.state_model_train_batch_size
+        batch_size = min(batch_size, len(test_episodes))
+
+        # get obs model results
+        self.state_model.eval()
+        with torch.no_grad():
+            props = self.get_batch(test_episodes, batch_size, use_mask=False)
+            r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
+            m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
+            m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
+
+            # prepend first real state to model generated states
+            s0 = torch.unsqueeze(r_state[:, 0, :], dim=1).to(self.device)
+            m_state = torch.cat((s0, m_state), dim=1)
+
+            self.obs_model.eval()
+            yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
+
+
+        y = y.to('cpu')
+        yp = yp.to('cpu')
+
+        idx = random.choice(range(batch_size))
+        scheme = self.get_obs_scheme()
+
+        fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
+        for k, v in scheme.items():
+            i = scheme[k]
+            ax[i].plot(y[idx, :, i], label='actual')
+            ax[i].plot(yp[idx, :, i], label='predicted')
+            ax[i].set_title(k)
+        plt.savefig(os.path.join(plot_dir, f"obs_{self.training_iterations}.png"))
         plt.close()
 
     def train(self, buffer, plot_test_results=False, plot_dir="plots"):
@@ -404,7 +514,8 @@ class SimPLeLearner:
         self.training_iterations += 1
 
         if plot_test_results:
-            self.plot_test_results(test_episodes, plot_dir)
+            self.plot_state_model(test_episodes, plot_dir)
+            self.plot_obs_model(test_episodes, plot_dir)
 
     def generate_batch(self, buffer, t_env):
 

@@ -34,16 +34,16 @@ class SimPLeLearner:
         self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, args.state_model_hidden_dim)
 
         # observation model
-        self.obs_model_input_size = self.state_size + self.term_size
-        if args.obs_model_include_last_action:
-            self.obs_model_input_size += self.action_size
+        self.obs_model_input_size = self.state_size
 
         self.agent_obs_size = scheme["obs"]["vshape"]
         self.obs_model_output_size = self.args.n_agents * (args.n_actions + self.agent_obs_size)
         self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
 
-        # meta
         self.training_iterations = 0
+        self.initial_state_model_trained = False
+        self.initial_obs_model_trained = False
+
 
     def get_state_scheme(self, other_features=False, custom_features=False):
 
@@ -202,7 +202,7 @@ class SimPLeLearner:
 
         return train_indices, test_indices
 
-    def get_training_episode_vars(self, ep):
+    def get_episode_vars(self, ep):
 
         # per-agent quantities
         obs = ep["obs"][:, :-1, ...]  # observations
@@ -266,22 +266,26 @@ class SimPLeLearner:
         y = torch.cat((ns, r, T), dim=-1)
         return s, a, y
 
-    def run_state_model(self, state, action, ht_ct=None):
+    def run_state_model(self, state, action, ht_ct=None, use_true_state=False):
 
         bs, steps, state_size = state.size()
         if not ht_ct:
             ht_ct = self.state_model.init_hidden(bs, self.device)
         yp = torch.zeros(bs, steps, self.state_model_output_size).to(self.device)
 
-        st = state[:, 0, :]  # initial state
         for t in range(0, steps):
+
+            if t == 0 or use_true_state:
+                st = state[:, t, :]
+            else:
+                st = yt[:, :state_size]
+
             at = action[:, t, :]
             xt = torch.cat((st, at), dim=-1)
 
             yt, ht_ct = self.state_model(xt, ht_ct)
             yp[:, t, :] = yt
 
-            st = yt[:, :state_size]
         return yp, ht_ct
 
     def train_state_model(self, train_episodes, test_episodes):
@@ -293,13 +297,16 @@ class SimPLeLearner:
         batch_size = self.args.state_model_train_batch_size
         batch_size = min(batch_size, len(test_episodes))
         optimizer = torch.optim.Adam(self.state_model.parameters(), lr=lr)
-        epochs = self.args.state_model_train_epochs
+        epochs = self.args.state_model_train_epochs if self.initial_state_model_trained else self.args.state_model_initial_train_epochs
         log_epochs = self.args.state_model_train_log_epochs
         use_mask = False # learning a termination signal is easier with unmasked input
-        train_err = []
-        val_err = []
+        use_true_state_train = False
+        mix = False
 
         # train state model
+        train_err = []
+        val_err = []
+        p_mix = 0.0
         for e in range(epochs):
 
             self.state_model.train()
@@ -307,7 +314,12 @@ class SimPLeLearner:
 
             props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
             state, action, y = self.get_state_model_input_output(*props)
-            yp, _ = self.run_state_model(state.to(self.device), action.to(self.device))
+
+            if mix:
+                p_mix = (epochs - e) / epochs
+                use_true_state_train = True if random.random() < p_mix else False
+
+            yp, _ = self.run_state_model(state.to(self.device), action.to(self.device), use_true_state=use_true_state_train)
             optimizer.zero_grad()
             loss = F.mse_loss(yp, y.to(self.device))
             loss.backward()
@@ -329,10 +341,13 @@ class SimPLeLearner:
                 train_err = np.array(train_err)
                 val_err = np.array(val_err)
                 t_epoch = time.time() - t_start
-                print(f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   time: {t_epoch:.2f} s")
+                print(f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    time: {t_epoch:.2f} s")
                 train_err = []
                 val_err = []
                 # self.logger.console_logger.info(f"Model training epoch {i}")
+
+        if not self.initial_state_model_trained:
+            self.initial_state_model_trained = True
 
     def shift(self, t, n, pad=0):
         t = torch.roll(t, n, 1)
@@ -341,25 +356,16 @@ class SimPLeLearner:
 
     def get_obs_model_input_output(self, state, action, reward, term_signal, obs, aa, mask):
         y = torch.cat((obs, aa), dim=-1)
-        return state, action, term_signal, y
+        return y[:, :-1, :]
 
-    def run_obs_model(self, state, last_action, term_signal, ht_ct=None):
+    def run_obs_model(self, state, ht_ct=None):
         bs, steps, state_size = state.size()
         if not ht_ct:
             ht_ct = self.obs_model.init_hidden(bs, self.device)
         yp = torch.zeros(bs, steps, self.obs_model_output_size).to(self.device)
 
         for t in range(0, steps):
-
-            st = state[:, t, :]
-            at = last_action[:, t, :]
-            tt = term_signal[:, t, :]
-
-            if self.args.obs_model_include_last_action:
-                xt = torch.cat((st, at, tt), dim=-1)
-            else:
-                xt = torch.cat((st, tt), dim=-1)
-
+            xt = state[:, t, :]
             yt, ht_ct = self.obs_model(xt, ht_ct)
             yp[:, t, :] = yt
 
@@ -375,30 +381,38 @@ class SimPLeLearner:
         batch_size = self.args.obs_model_train_batch_size
         batch_size = min(batch_size, len(test_episodes))
         optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=lr)
-        epochs = self.args.obs_model_train_epochs
+        epochs = self.args.obs_model_train_epochs if self.initial_obs_model_trained else self.args.obs_model_initial_train_epochs
         log_epochs = self.args.obs_model_train_log_epochs
         use_mask = self.args.obs_model_use_mask
-        optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=lr)
-        train_err = []
-        val_err = []
+        use_true_state_train = False
+        mix = False
 
         self.state_model.eval()
+        train_err = []
+        val_err = []
+        p_mix = 0.0
         for e in range(epochs):
             t_start = time.time()
             # use state model and real actions to generate synthetic episodes from real starts
             with torch.no_grad():
                 props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
-                r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
-                m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
-                m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
+                r_state, actions, y = self.get_state_model_input_output(*props)
 
-                # prepend first real state to model generated states
-                s0 = torch.unsqueeze(r_state[:, 0, :], dim=1).to(self.device)
-                m_state = torch.cat((s0, m_state), dim=1)
+                if mix:
+                    p_mix = max(0, (epochs - e) / epochs)
+                    use_true_state_train = True if random.random() < p_mix else False
+                    # print(p_mix, use_true_state)
+
+                if use_true_state_train:
+                    state = r_state
+                else:
+                    yp, _ = self.run_state_model(r_state.to(self.device), actions.to(self.device))
+                    state = yp[:, :, :r_state.size()[-1]]  # exclude post transition reward and term_signal
 
             # generate obs from states
             self.obs_model.train()
-            yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
+            y = self.get_obs_model_input_output(*props)
+            yp, _ = self.run_obs_model(state.to(self.device))
 
             # train obs model
             optimizer.zero_grad()
@@ -410,18 +424,15 @@ class SimPLeLearner:
 
             # validate obs model
             with torch.no_grad():
-                props = self.get_batch(test_episodes, batch_size, use_mask=use_mask)
-                r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
-                m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
-                m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
+                props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
+                r_state, actions, y = self.get_state_model_input_output(*props)
 
-                # prepend first real state to model generated states
-                s0 = torch.unsqueeze(r_state[:, 0, :], dim=1).to(self.device)
-                m_state = torch.cat((s0, m_state), dim=1)
+                yp, _ = self.run_state_model(r_state.to(self.device), actions.to(self.device))
+                state = yp[:, :, :r_state.size()[-1]]  # exclude post transition reward and term_signal
 
-                # generate obs from states
                 self.obs_model.eval()
-                yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
+                y = self.get_obs_model_input_output(*props)
+                yp, _ = self.run_obs_model(state.to(self.device))
                 val_err.append(F.mse_loss(yp, y.to(self.device)).item())
 
             if (e + 1) % log_epochs == 0:
@@ -430,9 +441,12 @@ class SimPLeLearner:
                 val_err = np.array(val_err)
                 t_epoch = time.time() - t_start
                 print(
-                    f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   time: {t_epoch:.2f} s")
+                    f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    time: {t_epoch:.2f} s")
                 train_err = []
                 val_err = []
+
+        if not self.initial_obs_model_trained:
+            self.initial_obs_model_trained = True
 
     def plot_state_model(self, test_episodes, plot_dir):
 
@@ -454,10 +468,9 @@ class SimPLeLearner:
 
         fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
         for k, v in scheme.items():
-            i = scheme[k]
-            ax[i].plot(y[idx, :, i], label='actual')
-            ax[i].plot(yp[idx, :, i], label='predicted')
-            ax[i].set_title(k)
+            ax[v].plot(y[idx, :, v], label='actual')
+            ax[v].plot(yp[idx, :, v], label='predicted')
+            ax[v].set_title(k)
         plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}.png"))
         plt.close()
 
@@ -470,17 +483,14 @@ class SimPLeLearner:
         self.state_model.eval()
         with torch.no_grad():
             props = self.get_batch(test_episodes, batch_size, use_mask=False)
-            r_state, action, term_signal, y = self.get_obs_model_input_output(*props)
-            m_state, _ = self.run_state_model(r_state.to(self.device), action.to(self.device))
-            m_state = m_state[:, :-1, :r_state.size()[-1]]  # exclude reward and term_signal and final timestep
+            r_state, actions, y = self.get_state_model_input_output(*props)
 
-            # prepend first real state to model generated states
-            s0 = torch.unsqueeze(r_state[:, 0, :], dim=1).to(self.device)
-            m_state = torch.cat((s0, m_state), dim=1)
+            yp, _ = self.run_state_model(r_state.to(self.device), actions.to(self.device))
+            state = yp[:, :, :r_state.size()[-1]]  # exclude post transition reward and term_signal
 
             self.obs_model.eval()
-            yp, _ = self.run_obs_model(m_state, self.shift(action, 1).to(self.device), term_signal.to(self.device))
-
+            y = self.get_obs_model_input_output(*props)
+            yp, _ = self.run_obs_model(state.to(self.device))
 
         y = y.to('cpu')
         yp = yp.to('cpu')
@@ -490,10 +500,9 @@ class SimPLeLearner:
 
         fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
         for k, v in scheme.items():
-            i = scheme[k]
-            ax[i].plot(y[idx, :, i], label='actual')
-            ax[i].plot(yp[idx, :, i], label='predicted')
-            ax[i].set_title(k)
+            ax[v].plot(y[idx, :, v], label='actual')
+            ax[v].plot(yp[idx, :, v], label='predicted')
+            ax[v].set_title(k)
         plt.savefig(os.path.join(plot_dir, f"obs_{self.training_iterations}.png"))
         plt.close()
 
@@ -506,8 +515,8 @@ class SimPLeLearner:
         train_indices, test_indices = self.train_test_split(indices, test_ratio=self.args.model_training_test_ratio, shuffle=True)
 
         # extract episodes
-        train_episodes = [self.get_training_episode_vars(buffer[i]) for i in train_indices]
-        test_episodes = [self.get_training_episode_vars(buffer[i]) for i in train_indices]
+        train_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
+        test_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
 
         self.train_state_model(train_episodes, test_episodes)
         self.train_obs_model(train_episodes, test_episodes)
@@ -554,7 +563,7 @@ class SimPLeLearner:
                 break
 
             # generate obs from state
-            output, o_ht_ct = self.run_obs_model(state, action, term_signal, ht_ct=o_ht_ct)
+            output, o_ht_ct = self.run_obs_model(state, ht_ct=o_ht_ct)
 
             batch_state = state
             if self.args.env_args["state_last_action"]:
@@ -563,7 +572,7 @@ class SimPLeLearner:
             avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
 
             # threshold avail_actions
-            threshold = 0.2
+            threshold = 0.5
             avail_actions = (avail_actions > threshold).float()
             #avail_actions[avail_actions < 0] = 0 # clip, we assume the distribution approaches the correct one over time
             avail_actions[:, :, :, 1] = 1 # stop action is always available
@@ -598,6 +607,48 @@ class SimPLeLearner:
             batch.update(post_transition_data, ts=t, bs=active_episodes)
 
         return batch
+
+    def plot_episode(self, batch,  plot_dir="plots"):
+        state_scheme = self.get_state_scheme(custom_features=True)
+        obs_scheme = self.get_obs_scheme()
+
+        # real env values following generated action history
+        actions = batch["actions"].squeeze()
+        #r_batch = runner.run_actions(actions)
+
+        # generated values
+        idx = random.choice(range(batch.batch_size))
+        g_state, g_action, g_reward, g_term_signal, g_obs, g_aa, g_mask = self.get_episode_vars(batch[idx])
+        g_state = g_state.cpu()
+        g_reward = g_reward.cpu()
+        g_term_signal = g_term_signal.cpu()
+
+        #r_state, r_action, r_reward, r_term_signal, r_obs, r_aa, r_mask = self.get_episode_vars(r_batch[idx])
+
+        # plot state
+        fig, ax = plt.subplots(len(state_scheme), figsize=(5, 5 * len(state_scheme)))
+        for k, v in state_scheme.items():
+            if k == "reward":
+                #ax[v].plot(r_reward[0, :, 0], label='real')
+                ax[v].plot(g_reward[0, :, 0], label='generated')
+            elif k == "term_signal":
+                #ax[v].plot(r_term_signal[0, :, 0], label='real')
+                ax[v].plot(g_term_signal[0, :, 0], label='generated')
+            else:
+                #ax[v].plot(r_state[0, :, v], label='real')
+                ax[v].plot(g_state[0, :, v], label='generated')
+            ax[v].set_title(k)
+        plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}_generated.png"))
+        plt.close()
+
+        # plot obs
+        fig, ax = plt.subplots(len(obs_scheme), figsize=(5, 5 * len(obs_scheme)))
+        g_obs_aa = torch.cat((g_obs, g_aa), dim=-1).cpu()
+        for k, v in obs_scheme.items():
+            ax[v].plot(g_obs_aa[0, :, v], label='generated')
+            ax[v].set_title(k)
+        plt.savefig(os.path.join(plot_dir, f"obs_{self.training_iterations}_generated.png"))
+        plt.close()
 
     def cuda(self):
         self.state_model.cuda()

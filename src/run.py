@@ -219,6 +219,8 @@ def run_sequential(args, logger):
                     with th.no_grad():
                         # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
                         model_batch = model_learner.generate_batch(buffer, runner.t_env)
+                        model_learner.plot_episode(model_batch)
+
                     model_buffer.insert_episode_batch(model_batch)
 
                     for i in range(args.model_policy_improvement_steps):

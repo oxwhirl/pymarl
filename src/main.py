@@ -35,6 +35,15 @@ def my_main(_run, _config, _log):
     run(_run, config, _log)
 
 
+def _get_basic_config(params, arg_name='env_args.map_name'):
+    for _i, _v in enumerate(params):
+        if _v.split("=")[0] == arg_name:
+            return _v.split("=")[1]
+    else:
+        raise ValueError('arg_name: {} should be set in command arguments, '
+                         'it is not found in {}'.format(arg_name, params))
+
+
 def _get_config(params, arg_name, subfolder):
     config_name = None
     for _i, _v in enumerate(params):
@@ -72,6 +81,7 @@ def config_copy(config):
 
 if __name__ == '__main__':
     params = deepcopy(sys.argv)
+    params_bak = deepcopy(sys.argv)
 
     # Get the defaults from default.yaml
     with open(os.path.join(os.path.dirname(__file__), "config", "default.yaml"), "r") as f:
@@ -91,10 +101,13 @@ if __name__ == '__main__':
     ex.add_config(config_dict)
 
     # Save to disk by default for sacred
-    logger.info("Saving to FileStorageObserver in results/sacred.")
-    file_obs_path = os.path.join(os.path.join(
-        os.path.join(results_path, config_dict['env_args']['map_name']), config_dict['name']), "sacred")
-    
+    save_path = os.path.join(os.path.join(
+        os.path.join(results_path,
+                     _get_basic_config(params_bak, 'env_args.map_name')),
+        _get_basic_config(params_bak, '--config')))
+
+    logger.info("Saving to FileStorageObserver in {}/sacred.".format(save_path))
+    file_obs_path = os.path.join(save_path, "sacred")
     ex.observers.append(FileStorageObserver.create(file_obs_path))
 
     ex.run_commandline(params)

@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
+from torch.distributions import Categorical
 
 class SimPLeLearner:
     def __init__(self, mac, scheme, logger, args):
@@ -44,6 +45,14 @@ class SimPLeLearner:
         self.initial_state_model_trained = False
         self.initial_obs_model_trained = False
 
+        # # load models for faster debugging
+        # print("loading models ...")
+        # obs_model_path = "src/obs-model.pt"
+        # state_model_path = "src/state-model.pt"
+        # self.state_model.load_state_dict(torch.load(state_model_path))
+        # self.obs_model.load_state_dict(torch.load(obs_model_path))
+        # self.initial_state_model_trained = True
+        # self.initial_obs_model_trained = True
 
     def get_state_scheme(self, other_features=False, custom_features=False):
 
@@ -116,9 +125,9 @@ class SimPLeLearner:
 
     def get_obs_scheme(self):
         move_feats_dim = np.product(self.env.get_obs_move_feats_size())
-        enemy_feats_dim = np.product(self.env.get_obs_enemy_feats_size())
-        ally_feats_dim = np.product(self.env.get_obs_ally_feats_size())
-        own_feats_dim = np.product(self.env.get_obs_own_feats_size())
+        # enemy_feats_dim = np.product(self.env.get_obs_enemy_feats_size())
+        # ally_feats_dim = np.product(self.env.get_obs_ally_feats_size())
+        # own_feats_dim = np.product(self.env.get_obs_own_feats_size())
 
         scheme = {}
         fidx = -1
@@ -184,9 +193,16 @@ class SimPLeLearner:
                     fname = f"agent_{a}_type_{i}"; fidx += 1; scheme[fname] = fidx
 
         # available actions
+        action_map = {v: k for v, k in
+                      enumerate(["no-op", "stop", "move_north", "move_south", "move_east", "move_west"])}
+        idx = len(action_map)
+        for i in range(self.env.n_enemies):
+            action_map[idx + i] = f"engage_enemy_{i}"
+
         for i in range(self.env.n_agents):
             for j in range(self.env.n_actions):
-                fname = f"agent_{i}_action_{j}_available"; fidx += 1; scheme[fname] = fidx
+                k = action_map[j]
+                fname = f"agent_{i}_action_{k}_available"; fidx += 1; scheme[fname] = fidx
 
         return scheme
 
@@ -542,11 +558,15 @@ class SimPLeLearner:
         batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length,
                         preprocess=buffer.preprocess, device=self.device)()
 
-        # construct observation model input
+        # get real starting states for the batch
         state = episodes["state"][:, 0, :self.state_size].unsqueeze(1).to(self.device)
-        term_signal = episodes["terminated"][:, 0, :].unsqueeze(1).float().to(self.device)
+        obs = episodes["obs"][:, 0].unsqueeze(1).to(self.device)
+        avail_actions = episodes["avail_actions"][:, 0].unsqueeze(1).to(self.device)
+        actions_onehot = torch.zeros_like(episodes["actions_onehot"][:, 0].view(batch_size, 1, -1)).to(self.device)
+        term_signal = episodes["terminated"][:, 0].unsqueeze(1).float().to(self.device)
         terminated = (term_signal > 0)
-        action = torch.zeros_like(episodes["actions_onehot"][:, 0, :].view(batch_size, 1, -1)).to(self.device)
+        active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
+
         obs_size = self.args.n_agents * self.agent_obs_size
 
         # initialise hidden states
@@ -554,29 +574,37 @@ class SimPLeLearner:
         s_ht_ct = None # state model hidden states
         self.mac.init_hidden(batch_size=batch_size)
 
+        bidx = 0
+        max_t = batch.max_seq_length - 1
         # generate episode sequence
-        for t in range(batch.max_seq_length):
+        for t in range(max_t):
 
-            # update active episodes
-            active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
-            if all(terminated):
-                break
+            # print(f"[{t:01}] active_episodes")
+            # print("   ", active_episodes)
+            #
+            # print(f"[{t:01}] state (excluding action)")
+            # print("   ", state[bidx])
+            #
+            # print(f"[{t:01}] obs")
+            # print("   ", obs[bidx])
+            #
+            # print(f"[{t:01}] avail_actions")
+            # print("   ", avail_actions[bidx])
 
-            # generate obs from state
-            output, o_ht_ct = self.run_obs_model(state, ht_ct=o_ht_ct)
+            #aa = avail_actions
+            # for i in range(aa.size()[0]):
+            #     try:
+            #         a = Categorical(aa[i].float()).sample()
+            #     except:
+            #         print(f"invalid avail actions on batch index {i} at timestep {t:01}")
+            #         print(aa[i])
+            #         for k, v in self.get_state_scheme(custom_features=False).items():
+            #             print(f"{k}: {state[i, :, v].item():.4f}")
+
 
             batch_state = state
             if self.args.env_args["state_last_action"]:
-                batch_state = torch.cat((state, action), dim=-1)
-            obs = output[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
-            avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
-
-            # threshold avail_actions
-            threshold = 0.5
-            avail_actions = (avail_actions > threshold).float()
-            #avail_actions[avail_actions < 0] = 0 # clip, we assume the distribution approaches the correct one over time
-            avail_actions[:, :, :, 1] = 1 # stop action is always available
-            #avail_actions[:, :, :, :] = 1  # all actions are available
+                batch_state = torch.cat((state, actions_onehot), dim=-1)
 
             pre_transition_data = {
                 "state": batch_state[active_episodes],
@@ -585,13 +613,19 @@ class SimPLeLearner:
             }
             batch.update(pre_transition_data, bs=active_episodes, ts=t)
 
-            # generate actions following current policy
-            action = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes).unsqueeze(1)
-            batch.update({"actions": action}, bs=active_episodes, ts=t) # this will generate actions_onehot
-            action = batch["actions_onehot"][:, -1, ...].view(batch_size, 1, -1)  # latest action
+            # choose actions following current policy
+            actions = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes).unsqueeze(1)
+            # print(f"[{t:01}] actions")
+            # print("   ", actions[bidx])
+
+            batch.update({"actions": actions}, bs=active_episodes, ts=t)  # this will generate actions_onehot
+            actions_onehot = batch["actions_onehot"][:, t, ...].view(batch_size, 1, -1)  # latest action
+
+            # print(f"[{t:01}] actions_onehot")
+            # print("   ", actions_onehot[bidx])
 
             # generate next state, reward and termination signal
-            output, s_ht_ct = self.run_state_model(state, action, ht_ct=s_ht_ct)
+            output, s_ht_ct = self.run_state_model(state, actions_onehot, ht_ct=s_ht_ct)
             state = output[:, :, :self.state_size]; idx = self.state_size
             reward = output[:, :, idx:idx + self.reward_size]; idx += self.reward_size
             term_signal = output[:, :, idx:idx + self.term_size]
@@ -600,11 +634,48 @@ class SimPLeLearner:
             threshold = 0.9
             terminated = (term_signal > threshold)
 
+            # if this is the last timestep, terminate
+            if t == max_t - 1:
+                terminated[active_episodes] = True
+
+            # print(f"[{t:01}] terminated")
+            # print("   ", terminated.flatten())
+
             post_transition_data = {
                 "reward": reward[active_episodes],
                 "terminated": terminated[active_episodes]
             }
             batch.update(post_transition_data, ts=t, bs=active_episodes)
+
+            # generate new observations
+            output, o_ht_ct = self.run_obs_model(state.to(self.device), ht_ct=o_ht_ct)
+            obs = output[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
+            avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
+
+            # threshold avail_actions
+            threshold = 0.5
+            avail_actions = (avail_actions > threshold).float()
+
+            # handle cases where no agent actions are available e.g. when agent is dead
+            mask = avail_actions.sum(-1) == 0
+            source = torch.zeros_like(avail_actions)
+            source[:, :, :, 0] = 1  # enable no-op
+            avail_actions[mask] = source[mask]
+
+            # add pre-tranition data to the batch at the next timestep
+            pre_transition_data = {
+                "state": batch_state[active_episodes],
+                "avail_actions": avail_actions[active_episodes],
+                "obs": obs[active_episodes]
+            }
+            batch.update(pre_transition_data, bs=active_episodes, ts=t+1)
+
+            # update active episodes
+            active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
+            if all(terminated):
+                break
+
+            #print("\n=================================================\n")
 
         return batch
 
@@ -616,8 +687,9 @@ class SimPLeLearner:
         actions = batch["actions"].squeeze()
         #r_batch = runner.run_actions(actions)
 
-        # generated values
-        idx = random.choice(range(batch.batch_size))
+        # generated value
+        #idx = random.choice(range(batch.batch_size))
+        idx = 0
         g_state, g_action, g_reward, g_term_signal, g_obs, g_aa, g_mask = self.get_episode_vars(batch[idx])
         g_state = g_state.cpu()
         g_reward = g_reward.cpu()

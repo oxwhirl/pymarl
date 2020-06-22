@@ -232,8 +232,8 @@ def run_sequential(args, logger):
                             model_episode_sample = model_buffer.sample(args.batch_size)
 
                             # truncate batch to only filled timesteps
-                            # max_ep_t = model_episode_sample.max_t_filled()
-                            # model_episode_sample = model_episode_sample[:, :max_ep_t]
+                            #max_ep_t = model_episode_sample.max_t_filled()
+                            #model_episode_sample = model_episode_sample[:, :max_ep_t]
 
                             if model_episode_sample.device != args.device:
                                 model_episode_sample.to(args.device)

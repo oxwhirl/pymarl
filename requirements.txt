@@ -31,7 +31,7 @@ pysc2==3.0.0
 pytest==3.8.2
 python-dateutil==2.7.3
 PyYAML==3.13
-requests==2.19.1
+requests==2.20.0
 s2clientprotocol==4.10.1.75800.0
 sacred==0.7.2
 scipy==1.1.0

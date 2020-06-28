@@ -32,14 +32,18 @@ class SimPLeLearner:
         # state model
         self.state_model_input_size = self.state_size + self.action_size
         self.state_model_output_size = self.state_size + self.reward_size + self.term_size
-        self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, args.state_model_hidden_dim)
+        self.state_model = None
+        #self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, args.state_model_hidden_dim)
+        #self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
 
         # observation model
         self.obs_model_input_size = self.state_size
 
         self.agent_obs_size = scheme["obs"]["vshape"]
         self.obs_model_output_size = self.args.n_agents * (args.n_actions + self.agent_obs_size)
-        self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
+        self.obs_model = None
+        #self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
+        #self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
 
         self.training_iterations = 0
         self.initial_state_model_trained = False
@@ -307,12 +311,16 @@ class SimPLeLearner:
     def train_state_model(self, train_episodes, test_episodes):
 
         print(f"State Model Training ...")
-        # model learning parameters
-        lr = self.args.state_model_learning_rate
+
+        self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, self.args.state_model_hidden_dim)
+        if self.args.use_cuda:
+            self.state_model.cuda()
+        self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
+
+        # model learning parameters        
         grad_clip = self.args.state_model_grad_clip_norm
         batch_size = self.args.state_model_train_batch_size
-        batch_size = min(batch_size, len(test_episodes))
-        optimizer = torch.optim.Adam(self.state_model.parameters(), lr=lr)
+        batch_size = min(batch_size, len(test_episodes))        
         epochs = self.args.state_model_train_epochs if self.initial_state_model_trained else self.args.state_model_initial_train_epochs
         log_epochs = self.args.state_model_train_log_epochs
         use_mask = False # learning a termination signal is easier with unmasked input
@@ -336,11 +344,11 @@ class SimPLeLearner:
                 use_true_state_train = True if random.random() < p_mix else False
 
             yp, _ = self.run_state_model(state.to(self.device), action.to(self.device), use_true_state=use_true_state_train)
-            optimizer.zero_grad()
+            self.state_model_optimizer.zero_grad()
             loss = F.mse_loss(yp, y.to(self.device))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.state_model.parameters(), grad_clip)
-            optimizer.step()
+            self.state_model_optimizer.step()
 
             train_err.append(loss.item())
 
@@ -391,12 +399,15 @@ class SimPLeLearner:
         # observation model training
         print(f"Observation Model Training ...")
 
+        self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, self.args.obs_model_hidden_dim)
+        if self.args.use_cuda:
+            self.obs_model.cuda()
+        self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
+
         # model learning parameters
-        lr = self.args.obs_model_learning_rate
         grad_clip = self.args.obs_model_grad_clip_norm
         batch_size = self.args.obs_model_train_batch_size
         batch_size = min(batch_size, len(test_episodes))
-        optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=lr)
         epochs = self.args.obs_model_train_epochs if self.initial_obs_model_trained else self.args.obs_model_initial_train_epochs
         log_epochs = self.args.obs_model_train_log_epochs
         use_mask = self.args.obs_model_use_mask
@@ -431,11 +442,11 @@ class SimPLeLearner:
             yp, _ = self.run_obs_model(state.to(self.device))
 
             # train obs model
-            optimizer.zero_grad()
+            self.obs_model_optimizer.zero_grad()
             loss = F.mse_loss(yp, y.to(self.device))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.obs_model.parameters(), grad_clip)
-            optimizer.step()
+            self.obs_model_optimizer.step()
             train_err.append(loss.item())
 
             # validate obs model
@@ -577,6 +588,7 @@ class SimPLeLearner:
         bidx = 0
         max_t = batch.max_seq_length - 1
         # generate episode sequence
+        print(f"Collecting {self.args.batch_size} episodes from MODEL ENV using epsilon: {self.mac.action_selector.epsilon}")
         for t in range(max_t):
 
             # print(f"[{t:01}] active_episodes")
@@ -614,7 +626,7 @@ class SimPLeLearner:
             batch.update(pre_transition_data, bs=active_episodes, ts=t)
 
             # choose actions following current policy
-            actions = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes).unsqueeze(1)
+            actions = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes, model_action=True).unsqueeze(1)
             # print(f"[{t:01}] actions")
             # print("   ", actions[bidx])
 
@@ -723,5 +735,7 @@ class SimPLeLearner:
         plt.close()
 
     def cuda(self):
-        self.state_model.cuda()
-        self.obs_model.cuda()
+        if self.state_model:
+            self.state_model.cuda()
+        if self.obs_model:
+            self.obs_model.cuda()

@@ -1,11 +1,19 @@
 # --- QMIX specific parameters ---
 
-# use epsilon greedy action selector
+# epsilon greedy action selector for policy learner
 action_selector: "epsilon_greedy"
 epsilon_start: 1.0
 epsilon_finish: 0.05
-epsilon_anneal_time: 50000
-epsilon_delay: 55000 # start epsilon decay after initial samples have been collected
+epsilon_anneal_time: 2000
+epsilon_delay: 0
+
+# epsilon greedy action selector for model learner
+mac: "simple_mac"
+model_action_selector: "model_epsilon_greedy" # used by by model learner on real env
+model_epsilon_start: 1.0
+model_epsilon_finish: 0.25
+model_epsilon_anneal_time: 500000
+model_epsilon_delay: 25000 # start epsilon decay on env action selection after initial samples have been collected
 
 buffer_size: 5000
 
@@ -25,14 +33,16 @@ hypernet_embed: 64
 model_learner: "simple_learner"
 model_rollout_batch_size: 32 # batch of rollouts to add to model_buffer
 model_buffer_size: 5000
-model_buffer_min_samples: 1024
+#model_buffer_min_samples: 1024
+model_policy_training_interval: 2048 # train model after every n real episodes
+model_training_steps: 10
 model_policy_improvement_steps: 1
 model_policy_test_interval: 1
 model_training_test_ratio: 0.1
 
 # environment state model learning
-state_model_initial_train_epochs: 1000
-state_model_train_epochs: 50
+state_model_initial_train_epochs: 2000
+state_model_train_epochs: 2000
 state_model_train_log_epochs: 10
 state_model_train_batch_size: 128
 state_model_learning_rate: 0.01
@@ -40,8 +50,8 @@ state_model_grad_clip_norm: 0.1
 state_model_hidden_dim: 128
 
 # environment observation model learning
-obs_model_initial_train_epochs: 1000
-obs_model_train_epochs: 50
+obs_model_initial_train_epochs: 2000
+obs_model_train_epochs: 2000
 obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 128
 obs_model_learning_rate: 0.01
@@ -53,11 +63,10 @@ obs_model_hidden_dim: 128
 # obs_model_include_last_action: True
 obs_model_use_mask: True # there are no obs after termination so may as well exclude learning those timesteps
 
-name: #"simple_qmix"
+name: "simple_qmix"
 use_cuda: True
 
 runner: "parallel"
-batch_size_run: 32 # Number of environments to run in parallel
 batch_size: 32
 
 test_greedy: True
@@ -65,7 +74,7 @@ test_nepisode: 32
 test_interval: 10000
 log_interval: 1000
 runner_log_interval: 1000
-learner_log_interval: 32
+learner_log_interval: 1000
 t_max: 2050000
 
 save_episodes: False

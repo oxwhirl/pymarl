@@ -179,80 +179,87 @@ def run_sequential(args, logger):
     model_episode = 0
     model_based_learning_iterations = 0
     model_based_learning_step = 0
-
-    save_buffer = False
-    load_buffer = False
-    force_save = False
-    buffer_file = f"buffers/buffer_episode_{args.model_buffer_min_samples}.pkl"
-    buffer_saved = False
+    buffer_new_episodes = 0
+    model_training_iteration = 0
+    buffer_dir = "buffers"
 
     logger.console_logger.info("Beginning training for {} timesteps".format(args.t_max))
 
-    if load_buffer and os.path.exists(buffer_file):
-        with open(buffer_file, 'rb') as f:
-            buffer, runner.t_env = pickle.load(f)
-            print(f"Loaded buffer {buffer_file} at t_env {runner.t_env}")
-
     while runner.t_env <= args.t_max:
 
-        # Run for a whole episode at a time
-        episode_batch = runner.run(test_mode=False)
-        buffer.insert_episode_batch(episode_batch)
+        if model_learner:
 
-        if buffer.can_sample(args.batch_size):
+            # train model
+            if model_training_iteration < args.model_training_steps:
 
-            if model_learner:
+                # collect real episodes
+                print(
+                    f"Collecting {args.batch_size} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon}")
+                episode_batch = runner.run(test_mode=False)
+                buffer.insert_episode_batch(episode_batch)
+                buffer_new_episodes += episode_batch.batch_size
 
-                if buffer.episodes_in_buffer >= args.model_buffer_min_samples:
+                #if buffer.episodes_in_buffer >= args.model_buffer_min_samples:
 
-                    # supervised training of state and observation models
-                    if save_buffer and not buffer_saved:
-                        if not os.path.exists(buffer_file) or force_save:
-                            # save the buffer
-                            with open(buffer_file, 'wb') as f:
-                                pickle.dump((buffer, runner.t_env), f)
-                                buffer_saved = True
-                                print(f"Saved buffer {buffer_file}")
-
+                # supervised training of state and observation models
+                if buffer_new_episodes >= args.model_policy_training_interval:
                     model_learner.train(buffer, plot_test_results=True)
-                    # generate buffer of synthetic episodes from real starts using current policy
+                    save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
+                                verbose=True)
+                    save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
+                                verbose=True)
+                    buffer_new_episodes -= args.model_policy_training_interval
+                    model_training_iteration += 1
+
+                    # plot a generated episode
                     with th.no_grad():
-                        # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
-                        model_batch = model_learner.generate_batch(buffer, runner.t_env)
+                        model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
                         model_learner.plot_episode(model_batch)
 
-                    model_buffer.insert_episode_batch(model_batch)
+            # learn from model
+            if model_training_iteration > 0:
+                # generate buffer of synthetic episodes from real starts using current policy
+                with th.no_grad():
+                    # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
+                    model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
+                    #model_learner.plot_episode(model_batch)
 
-                    for i in range(args.model_policy_improvement_steps):
+                model_buffer.insert_episode_batch(model_batch)
 
-                        # improve policy
-                        if model_buffer.can_sample(args.batch_size):
+            for i in range(args.model_policy_improvement_steps):
 
-                            # sample episode batch from the model replay buffer
-                            model_episode_sample = model_buffer.sample(args.batch_size)
+                # improve policy
+                if model_buffer.can_sample(args.batch_size):
 
-                            # truncate batch to only filled timesteps
-                            #max_ep_t = model_episode_sample.max_t_filled()
-                            #model_episode_sample = model_episode_sample[:, :max_ep_t]
+                    # sample episode batch from the model replay buffer
+                    model_episode_sample = model_buffer.sample(args.batch_size)
 
-                            if model_episode_sample.device != args.device:
-                                model_episode_sample.to(args.device)
+                    # truncate batch to only filled timesteps
+                    #max_ep_t = model_episode_sample.max_t_filled()
+                    #model_episode_sample = model_episode_sample[:, :max_ep_t]
 
-                            # train RL agent
-                            learner.train(model_episode_sample, runner.t_env, model_episode)
-                            model_based_learning_iterations += 1
-                            model_episode += args.batch_size
+                    if model_episode_sample.device != args.device:
+                        model_episode_sample.to(args.device)
 
-                            # Execute test runs once in a while
-                            n_test_runs = max(1, args.test_nepisode // runner.batch_size)
-                            if model_based_learning_iterations % args.model_policy_test_interval == 0:
-                                print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
-                                for _ in range(n_test_runs):
-                                    runner.run(test_mode=True)
-                                    logger.print_recent_stats()
-                    model_based_learning_step += 1
+                    # train RL agent
+                    learner.train(model_episode_sample, runner.t_env, model_episode)
+                    model_based_learning_iterations += 1
+                    model_episode += args.batch_size
 
-            else:
+                    # Execute test runs once in a while
+                    n_test_runs = max(1, args.test_nepisode // runner.batch_size)
+                    if model_based_learning_iterations % args.model_policy_test_interval == 0:
+                        print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
+                        for _ in range(n_test_runs):
+                            runner.run(test_mode=True)
+                            logger.print_recent_stats()
+            model_based_learning_step += 1
+
+        else:
+            episode_batch = runner.run(test_mode=False)
+            buffer.insert_episode_batch(episode_batch)
+
+            if buffer.can_sample(args.batch_size):
                 episode_sample = buffer.sample(args.batch_size)
 
                 # Truncate batch to only filled timesteps
@@ -297,6 +304,12 @@ def run_sequential(args, logger):
 
     runner.close_env()
     logger.console_logger.info("Finished Training")
+
+def save_buffer(buffer, filename, verbose=False):
+    with open(filename, 'wb') as f:
+        pickle.dump(buffer, f)
+        if verbose:
+            print(f"Saved buffer {filename}")
 
 def args_sanity_check(config, _log):
 

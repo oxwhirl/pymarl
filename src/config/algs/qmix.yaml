@@ -22,7 +22,4 @@ mixing_embed_dim: 32
 hypernet_layers: 2
 hypernet_embed: 64
 
-runner: "parallel"
-batch_size_run: 32 # Number of environments to run in parallel
-
 name: "qmix"

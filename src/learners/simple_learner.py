@@ -45,9 +45,14 @@ class SimPLeLearner:
         #self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
         #self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
 
+        self.model_episodes = 0
         self.training_iterations = 0
         self.initial_state_model_trained = False
         self.initial_obs_model_trained = False
+
+        self.state_model_train_loss, self.state_model_val_loss = 0, 0
+        self.obs_model_train_loss, self.obs_model_val_loss = 0, 0
+        self.log_stats_t = -self.args.learner_log_interval - 1
 
         # # load models for faster debugging
         # print("loading models ...")
@@ -57,6 +62,8 @@ class SimPLeLearner:
         # self.obs_model.load_state_dict(torch.load(obs_model_path))
         # self.initial_state_model_trained = True
         # self.initial_obs_model_trained = True
+
+
 
     def get_state_scheme(self, other_features=False, custom_features=False):
 
@@ -96,18 +103,18 @@ class SimPLeLearner:
         # allies
         ally_scheme = {"health": 0, "cooldown": 1, "x": 2, "y": 3}
         idx = 4
-        if self.env.shield_bits_ally > 0:
-            ally_scheme["ally_shield"] = idx; idx += 1
-        if self.env.unit_type_bits > 0:
-            ally_scheme["ally_type"] = idx; idx += 1
+        for i in range(self.env.shield_bits_ally):
+            ally_scheme[f"ally_shield_{i}"] = idx; idx += 1
+        for i in range(self.env.unit_type_bits):
+            ally_scheme[f"ally_type_{i}"] = idx; idx += 1
 
         # enemies
         enemy_scheme = {"health": 0, "x": 1, "y": 2}
         idx = 3
-        if self.env.shield_bits_enemy > 0:
-            enemy_scheme["shield"] = idx; idx += 1
-        if self.env.unit_type_bits > 0:
-            enemy_scheme["type"] = idx;
+        for i in range(self.env.shield_bits_enemy):
+            enemy_scheme[f"ally_shield_{i}"] = idx; idx += 1
+        for i in range(self.env.unit_type_bits):
+            enemy_scheme[f"enemy_type_{i}"] = idx; idx += 1
 
         # other
         nf_other = 0
@@ -331,10 +338,12 @@ class SimPLeLearner:
         train_err = []
         val_err = []
         p_mix = 0.0
+        t_start = time.time()
+        sample_train_loss = 0
+        sample_val_loss = 0
         for e in range(epochs):
 
             self.state_model.train()
-            t_start = time.time()
 
             props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
             state, action, y = self.get_state_model_input_output(*props)
@@ -349,8 +358,8 @@ class SimPLeLearner:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.state_model.parameters(), grad_clip)
             self.state_model_optimizer.step()
-
-            train_err.append(loss.item())
+            sample_train_loss = loss.item()
+            train_err.append(sample_train_loss)
 
             self.state_model.eval()
             with torch.no_grad():
@@ -358,20 +367,26 @@ class SimPLeLearner:
                 props = self.get_batch(test_episodes, batch_size, use_mask=use_mask)
                 state, action, y = self.get_state_model_input_output(*props)
                 yp, _ = self.run_state_model(state.to(self.device), action.to(self.device))
-                val_err.append(F.mse_loss(yp, y.to(self.device)).item())
+                sample_val_loss = F.mse_loss(yp, y.to(self.device)).item()
+                val_err.append(sample_val_loss)
 
             if (e + 1) % log_epochs == 0:
                 # report epoch losses
                 train_err = np.array(train_err)
                 val_err = np.array(val_err)
-                t_epoch = time.time() - t_start
-                print(f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    time: {t_epoch:.2f} s")
+                t_step = (time.time() - t_start) / log_epochs
+                print(f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   "
+                      f"val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    "
+                      f"time/step: {t_step:.2f} s")
                 train_err = []
                 val_err = []
+                t_start = time.time()
                 # self.logger.console_logger.info(f"Model training epoch {i}")
 
         if not self.initial_state_model_trained:
             self.initial_state_model_trained = True
+
+        return sample_train_loss, sample_val_loss
 
     def shift(self, t, n, pad=0):
         t = torch.roll(t, n, 1)
@@ -418,8 +433,10 @@ class SimPLeLearner:
         train_err = []
         val_err = []
         p_mix = 0.0
+        t_start = time.time()
+        sample_train_loss = 0
+        sample_val_loss = 0
         for e in range(epochs):
-            t_start = time.time()
             # use state model and real actions to generate synthetic episodes from real starts
             with torch.no_grad():
                 props = self.get_batch(train_episodes, batch_size, use_mask=use_mask)
@@ -447,7 +464,8 @@ class SimPLeLearner:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.obs_model.parameters(), grad_clip)
             self.obs_model_optimizer.step()
-            train_err.append(loss.item())
+            sample_train_loss = loss.item()
+            train_err.append(sample_train_loss)
 
             # validate obs model
             with torch.no_grad():
@@ -460,20 +478,24 @@ class SimPLeLearner:
                 self.obs_model.eval()
                 y = self.get_obs_model_input_output(*props)
                 yp, _ = self.run_obs_model(state.to(self.device))
-                val_err.append(F.mse_loss(yp, y.to(self.device)).item())
+                sample_val_loss = F.mse_loss(yp, y.to(self.device)).item()
+                val_err.append(sample_val_loss)
 
             if (e + 1) % log_epochs == 0:
                 # report epoch losses
                 train_err = np.array(train_err)
                 val_err = np.array(val_err)
-                t_epoch = time.time() - t_start
+                t_step = (time.time() - t_start) / log_epochs
                 print(
-                    f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    time: {t_epoch:.2f} s")
+                    f"epoch: {e + 1:<3}   train loss: mean {train_err.mean():.5f}, std: {train_err.std():.5f}   val loss: mean {val_err.mean():.5f}, std: {val_err.std():.5f}   p_mix: {p_mix:.2f}    time/step: {t_step:.2f} s")
                 train_err = []
                 val_err = []
+                t_start = time.time()
 
         if not self.initial_obs_model_trained:
             self.initial_obs_model_trained = True
+
+        return sample_train_loss, sample_val_loss
 
     def plot_state_model(self, test_episodes, plot_dir):
 
@@ -493,13 +515,21 @@ class SimPLeLearner:
         idx = random.choice(range(batch_size))
         scheme = self.get_state_scheme(custom_features=True)
 
-        fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
-        for k, v in scheme.items():
-            ax[v].plot(y[idx, :, v], label='actual')
-            ax[v].plot(yp[idx, :, v], label='predicted')
-            ax[v].set_title(k)
-        plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}.png"))
-        plt.close()
+        keys = list(scheme.keys())
+        features_per_figure = 100
+        n_figures = len(keys) // features_per_figure + 1
+        start = 0
+        end = min(start + features_per_figure, len(keys))
+        for f in range(n_figures):
+            n_features = end - start
+            fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * n_features))
+            for i, k in enumerate(keys[start:end]):
+                v = scheme[k]
+                ax[i].plot(y[idx, :, v], label='actual')
+                ax[i].plot(yp[idx, :, v], label='predicted')
+                ax[i].set_title(k)
+            plt.savefig(os.path.join(plot_dir, f"state_{self.training_iterations}_part_{f}.png"))
+            plt.close()
 
     def plot_obs_model(self, test_episodes, plot_dir):
 
@@ -524,16 +554,23 @@ class SimPLeLearner:
 
         idx = random.choice(range(batch_size))
         scheme = self.get_obs_scheme()
+        keys = list(scheme.keys())
+        features_per_figure = 100
+        n_figures = len(keys) // features_per_figure + 1
+        start = 0
+        end = min(start + features_per_figure, len(keys))
+        for f in range(n_figures):
+            n_features = end - start
+            fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * n_features))
+            for i, k in enumerate(keys[start:end]):
+                v = scheme[k]
+                ax[i].plot(y[idx, :, v], label='actual')
+                ax[i].plot(yp[idx, :, v], label='predicted')
+                ax[i].set_title(k)
+            plt.savefig(os.path.join(plot_dir, f"obs_{self.training_iterations}_part_{f}.png"))
+            plt.close()
 
-        fig, ax = plt.subplots(len(scheme), figsize=(5, 5 * len(scheme)))
-        for k, v in scheme.items():
-            ax[v].plot(y[idx, :, v], label='actual')
-            ax[v].plot(yp[idx, :, v], label='predicted')
-            ax[v].set_title(k)
-        plt.savefig(os.path.join(plot_dir, f"obs_{self.training_iterations}.png"))
-        plt.close()
-
-    def train(self, buffer, plot_test_results=False, plot_dir="plots"):
+    def train(self, buffer, t_env, plot_test_results=False, plot_dir="plots"):
 
         print(f"Training with {buffer.episodes_in_buffer} episodes")
 
@@ -545,8 +582,8 @@ class SimPLeLearner:
         train_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
         test_episodes = [self.get_episode_vars(buffer[i]) for i in train_indices]
 
-        self.train_state_model(train_episodes, test_episodes)
-        self.train_obs_model(train_episodes, test_episodes)
+        self.state_model_train_loss, self.state_model_val_loss = self.train_state_model(train_episodes, test_episodes)
+        self.obs_model_train_loss, self.obs_model_val_loss = self.train_obs_model(train_episodes, test_episodes)
         self.training_iterations += 1
 
         if plot_test_results:
@@ -576,7 +613,7 @@ class SimPLeLearner:
         actions_onehot = torch.zeros_like(episodes["actions_onehot"][:, 0].view(batch_size, 1, -1)).to(self.device)
         term_signal = episodes["terminated"][:, 0].unsqueeze(1).float().to(self.device)
         terminated = (term_signal > 0)
-        active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
+        active_episodes = [i for i, finished in enumerate(terminated.flatten()) if not finished]
 
         obs_size = self.args.n_agents * self.agent_obs_size
 
@@ -588,7 +625,7 @@ class SimPLeLearner:
         bidx = 0
         max_t = batch.max_seq_length - 1
         # generate episode sequence
-        print(f"Collecting {self.args.batch_size} episodes from MODEL ENV using epsilon: {self.mac.action_selector.epsilon}")
+        print(f"Collecting {self.args.model_rollout_batch_size} episodes from MODEL ENV using epsilon: {self.mac.action_selector.epsilon:.2f}, model_episodes: {self.model_episodes}")
         for t in range(max_t):
 
             # print(f"[{t:01}] active_episodes")
@@ -626,7 +663,7 @@ class SimPLeLearner:
             batch.update(pre_transition_data, bs=active_episodes, ts=t)
 
             # choose actions following current policy
-            actions = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes, model_action=True).unsqueeze(1)
+            actions = self.mac.select_actions(batch, t_ep=t, t_env=self.model_episodes, bs=active_episodes, model_action=True).unsqueeze(1)
             # print(f"[{t:01}] actions")
             # print("   ", actions[bidx])
 
@@ -683,11 +720,13 @@ class SimPLeLearner:
             batch.update(pre_transition_data, bs=active_episodes, ts=t+1)
 
             # update active episodes
-            active_episodes = [i for i, finished in enumerate(terminated.squeeze()) if not finished]
+            active_episodes = [i for i, finished in enumerate(terminated.flatten()) if not finished]
             if all(terminated):
                 break
 
             #print("\n=================================================\n")
+
+        self.model_episodes += self.args.model_rollout_batch_size
 
         return batch
 
@@ -739,3 +778,15 @@ class SimPLeLearner:
             self.state_model.cuda()
         if self.obs_model:
             self.obs_model.cuda()
+
+    def log_stats(self, t_env):
+        if t_env - self.log_stats_t >= self.args.learner_log_interval:
+            self.logger.log_stat("state_model_train_loss", self.state_model_train_loss, t_env)
+            self.logger.log_stat("state_model_val_loss", self.state_model_val_loss, t_env)
+            self.logger.log_stat("obs_model_train_loss", self.obs_model_train_loss, t_env)
+            self.logger.log_stat("obs_model_val_loss", self.obs_model_val_loss, t_env)
+            self.logger.log_stat("simple_training_iterations", self.training_iterations, t_env)
+            self.logger.log_stat("model_episodes", self.model_episodes, t_env)
+            self.logger.log_stat("model_epsilon", self.mac.action_selector.epsilon, t_env)
+            self.logger.log_stat("env_epsilon", self.mac.env_action_selector.epsilon, t_env)
+            self.log_stats_t = t_env

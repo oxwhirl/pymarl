@@ -180,7 +180,8 @@ def run_sequential(args, logger):
     model_based_learning_iterations = 0
     model_based_learning_step = 0
     buffer_new_episodes = 0
-    model_training_iteration = 0
+    model_training_iterations = 0
+    collect_real_episodes = True
     model_trained = False
     buffer_dir = "buffers"
 
@@ -191,30 +192,30 @@ def run_sequential(args, logger):
         if model_learner:
 
             # collect real episodes
-            print(
-                f"Collecting {args.batch_size_run} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon:.2f}, t_env: {runner.t_env}")
-            episode_batch = runner.run(test_mode=False)
-            buffer.insert_episode_batch(episode_batch)
-            buffer_new_episodes += episode_batch.batch_size
-
-            #if buffer.episodes_in_buffer >= args.model_buffer_min_samples:
+            if collect_real_episodes:
+                print(
+                    f"Collecting {args.batch_size_run} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon:.2f}, t_env: {runner.t_env}")
+                episode_batch = runner.run(test_mode=False)
+                buffer.insert_episode_batch(episode_batch)
+                buffer_new_episodes += episode_batch.batch_size
 
             # supervised training of state and observation models
             if not model_trained and buffer.episodes_in_buffer >= args.model_min_training_episodes:
                 # train initial model
                 model_learner.train(buffer, runner.t_env, plot_test_results=False)
                 buffer_new_episodes -= args.model_min_training_episodes
-                model_training_iteration += 1
+                model_training_iterations += 1
                 model_trained = True
                 #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
                 #            verbose=True)
                 #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
                 #            verbose=True)
 
-            elif model_trained and buffer_new_episodes >= args.model_policy_training_interval:
+            elif model_trained and model_training_iterations < args.model_n_training_iterations and \
+                    buffer_new_episodes >= args.model_policy_training_interval:
                 model_learner.train(buffer, runner.t_env, plot_test_results=False)
                 buffer_new_episodes -= args.model_policy_training_interval
-                model_training_iteration += 1
+                model_training_iterations += 1
                 #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
                 #            verbose=True)
                 #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),

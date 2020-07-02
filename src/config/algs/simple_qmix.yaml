@@ -33,15 +33,17 @@ hypernet_embed: 64
 model_learner: "simple_learner"
 model_rollout_batch_size: 1 # batch of rollouts to add to model_buffer
 model_buffer_size: 5000
-model_min_training_episodes: 256
-model_policy_training_interval: 1024 # train model after every n real episodes
+model_min_training_episodes: 1024
+model_n_training_iterations: 1
+model_policy_training_interval: 1 # train model after every n real episodes
 model_policy_improvement_steps: 1
 model_policy_test_interval: 1
 model_training_test_ratio: 0.1
+model_reuse_existing: True
 
 # environment state model learning
-state_model_initial_train_epochs: 200
-state_model_train_epochs: 200
+state_model_initial_train_epochs: 1000
+state_model_train_epochs: 1000
 state_model_train_log_epochs: 100
 state_model_train_batch_size: 128
 state_model_learning_rate: 0.01
@@ -49,8 +51,8 @@ state_model_grad_clip_norm: 0.1
 state_model_hidden_dim: 128
 
 # environment observation model learning
-obs_model_initial_train_epochs: 200
-obs_model_train_epochs: 200
+obs_model_initial_train_epochs: 1000
+obs_model_train_epochs: 1000
 obs_model_train_log_epochs: 100
 obs_model_train_batch_size: 128
 obs_model_learning_rate: 0.01
@@ -62,7 +64,7 @@ obs_model_hidden_dim: 128
 # obs_model_include_last_action: True
 obs_model_use_mask: True # there are no obs after termination so may as well exclude learning those timesteps
 
-name: "simple-qmix-bs-1-develop"
+name: "simple-qmix-bs-1-develop-live"
 
 runner: episode
 batch_size_run: 1
@@ -75,5 +77,5 @@ test_interval: 1000
 log_interval: 1000
 runner_log_interval: 1000
 learner_log_interval: 1000
-
+t_max: 200000
 save_model: False

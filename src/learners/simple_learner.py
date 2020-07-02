@@ -33,8 +33,9 @@ class SimPLeLearner:
         self.state_model_input_size = self.state_size + self.action_size
         self.state_model_output_size = self.state_size + self.reward_size + self.term_size
         self.state_model = None
-        #self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, args.state_model_hidden_dim)
-        #self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
+        if self.args.model_reuse_existing:
+            self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, args.state_model_hidden_dim)
+            self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
 
         # observation model
         self.obs_model_input_size = self.state_size
@@ -42,8 +43,9 @@ class SimPLeLearner:
         self.agent_obs_size = scheme["obs"]["vshape"]
         self.obs_model_output_size = self.args.n_agents * (args.n_actions + self.agent_obs_size)
         self.obs_model = None
-        #self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
-        #self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
+        if self.args.model_reuse_existing:
+            self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, args.obs_model_hidden_dim)
+            self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
 
         self.model_episodes = 0
         self.training_iterations = 0
@@ -62,8 +64,6 @@ class SimPLeLearner:
         # self.obs_model.load_state_dict(torch.load(obs_model_path))
         # self.initial_state_model_trained = True
         # self.initial_obs_model_trained = True
-
-
 
     def get_state_scheme(self, other_features=False, custom_features=False):
 
@@ -319,10 +319,11 @@ class SimPLeLearner:
 
         print(f"State Model Training ...")
 
-        self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, self.args.state_model_hidden_dim)
-        if self.args.use_cuda:
-            self.state_model.cuda()
-        self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
+        if not self.args.model_reuse_existing:
+            self.state_model = SimPLeModel(self.state_model_input_size, self.state_model_output_size, self.args.state_model_hidden_dim)
+            if self.args.use_cuda:
+                self.state_model.cuda()
+            self.state_model_optimizer = torch.optim.Adam(self.state_model.parameters(), lr=self.args.state_model_learning_rate)
 
         # model learning parameters        
         grad_clip = self.args.state_model_grad_clip_norm
@@ -414,10 +415,11 @@ class SimPLeLearner:
         # observation model training
         print(f"Observation Model Training ...")
 
-        self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, self.args.obs_model_hidden_dim)
-        if self.args.use_cuda:
-            self.obs_model.cuda()
-        self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
+        if not self.args.model_reuse_existing:
+            self.obs_model = SimPLeModel(self.obs_model_input_size, self.obs_model_output_size, self.args.obs_model_hidden_dim)
+            if self.args.use_cuda:
+                self.obs_model.cuda()
+            self.obs_model_optimizer = torch.optim.Adam(self.obs_model.parameters(), lr=self.args.obs_model_learning_rate)
 
         # model learning parameters
         grad_clip = self.args.obs_model_grad_clip_norm

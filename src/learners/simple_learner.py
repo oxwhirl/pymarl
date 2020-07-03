@@ -592,145 +592,144 @@ class SimPLeLearner:
             self.plot_state_model(test_episodes, plot_dir)
             self.plot_obs_model(test_episodes, plot_dir)
 
-    def generate_batch(self, buffer, t_env):
+    def generate_batch(self, buffer, batch_size, t_env):
 
         self.state_model.eval()
         self.obs_model.eval()
 
-        # sample real starts from the replay buffer
-        batch_size = min(buffer.episodes_in_buffer, self.args.model_rollout_batch_size)
-        episodes = buffer.sample(batch_size)
-        #self.logger.console_logger.info(f"Generating {batch_size} model based episodes")
+        with torch.no_grad():
+            # sample real starts from the replay buffer
+            episodes = buffer.sample(batch_size)
+            #self.logger.console_logger.info(f"Generating {batch_size} model based episodes")
 
-        # create new episode batch for generated episodes
-        scheme = buffer.scheme.copy()
-        scheme.pop("filled", None)  # buffer scheme excluding filled key
-        batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length,
-                        preprocess=buffer.preprocess, device=self.device)()
+            # create new episode batch for generated episodes
+            scheme = buffer.scheme.copy()
+            scheme.pop("filled", None)  # buffer scheme excluding filled key
+            batch = partial(EpisodeBatch, scheme, buffer.groups, batch_size, buffer.max_seq_length,
+                            preprocess=buffer.preprocess, device=self.device)()
 
-        # get real starting states for the batch
-        state = episodes["state"][:, 0, :self.state_size].unsqueeze(1).to(self.device)
-        obs = episodes["obs"][:, 0].unsqueeze(1).to(self.device)
-        avail_actions = episodes["avail_actions"][:, 0].unsqueeze(1).to(self.device)
-        actions_onehot = torch.zeros_like(episodes["actions_onehot"][:, 0].view(batch_size, 1, -1)).to(self.device)
-        term_signal = episodes["terminated"][:, 0].unsqueeze(1).float().to(self.device)
-        terminated = (term_signal > 0)
-        active_episodes = [i for i, finished in enumerate(terminated.flatten()) if not finished]
-
-        obs_size = self.args.n_agents * self.agent_obs_size
-
-        # initialise hidden states
-        o_ht_ct = None # obs model hidden states
-        s_ht_ct = None # state model hidden states
-        self.mac.init_hidden(batch_size=batch_size)
-
-        bidx = 0
-        max_t = batch.max_seq_length - 1
-        # generate episode sequence
-        print(f"Collecting {self.args.model_rollout_batch_size} episodes from MODEL ENV using epsilon: {self.mac.action_selector.epsilon:.2f}, model_episodes: {self.model_episodes}")
-        for t in range(max_t):
-
-            # print(f"[{t:01}] active_episodes")
-            # print("   ", active_episodes)
-            #
-            # print(f"[{t:01}] state (excluding action)")
-            # print("   ", state[bidx])
-            #
-            # print(f"[{t:01}] obs")
-            # print("   ", obs[bidx])
-            #
-            # print(f"[{t:01}] avail_actions")
-            # print("   ", avail_actions[bidx])
-
-            #aa = avail_actions
-            # for i in range(aa.size()[0]):
-            #     try:
-            #         a = Categorical(aa[i].float()).sample()
-            #     except:
-            #         print(f"invalid avail actions on batch index {i} at timestep {t:01}")
-            #         print(aa[i])
-            #         for k, v in self.get_state_scheme(custom_features=False).items():
-            #             print(f"{k}: {state[i, :, v].item():.4f}")
-
-
-            batch_state = state
-            if self.args.env_args["state_last_action"]:
-                batch_state = torch.cat((state, actions_onehot), dim=-1)
-
-            pre_transition_data = {
-                "state": batch_state[active_episodes],
-                "avail_actions": avail_actions[active_episodes],
-                "obs": obs[active_episodes]
-            }
-            batch.update(pre_transition_data, bs=active_episodes, ts=t)
-
-            # choose actions following current policy
-            actions = self.mac.select_actions(batch, t_ep=t, t_env=self.model_episodes, bs=active_episodes, model_action=True).unsqueeze(1)
-            # print(f"[{t:01}] actions")
-            # print("   ", actions[bidx])
-
-            batch.update({"actions": actions}, bs=active_episodes, ts=t)  # this will generate actions_onehot
-            actions_onehot = batch["actions_onehot"][:, t, ...].view(batch_size, 1, -1)  # latest action
-
-            # print(f"[{t:01}] actions_onehot")
-            # print("   ", actions_onehot[bidx])
-
-            # generate next state, reward and termination signal
-            output, s_ht_ct = self.run_state_model(state, actions_onehot, ht_ct=s_ht_ct)
-            state = output[:, :, :self.state_size]; idx = self.state_size
-            reward = output[:, :, idx:idx + self.reward_size]; idx += self.reward_size
-            term_signal = output[:, :, idx:idx + self.term_size]
-
-            # generate termination mask
-            threshold = 0.9
-            terminated = (term_signal > threshold)
-
-            # if this is the last timestep, terminate
-            if t == max_t - 1:
-                terminated[active_episodes] = True
-
-            # print(f"[{t:01}] terminated")
-            # print("   ", terminated.flatten())
-
-            post_transition_data = {
-                "reward": reward[active_episodes],
-                "terminated": terminated[active_episodes]
-            }
-            batch.update(post_transition_data, ts=t, bs=active_episodes)
-
-            # generate new observations
-            output, o_ht_ct = self.run_obs_model(state.to(self.device), ht_ct=o_ht_ct)
-            obs = output[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
-            avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
-
-            # threshold avail_actions
-            threshold = 0.5
-            avail_actions = (avail_actions > threshold).float()
-
-            # handle cases where no agent actions are available e.g. when agent is dead
-            mask = avail_actions.sum(-1) == 0
-            source = torch.zeros_like(avail_actions)
-            source[:, :, :, 0] = 1  # enable no-op
-            avail_actions[mask] = source[mask]
-
-            # add pre-tranition data to the batch at the next timestep
-            pre_transition_data = {
-                "state": batch_state[active_episodes],
-                "avail_actions": avail_actions[active_episodes],
-                "obs": obs[active_episodes]
-            }
-            batch.update(pre_transition_data, bs=active_episodes, ts=t+1)
-
-            # update active episodes
+            # get real starting states for the batch
+            state = episodes["state"][:, 0, :self.state_size].unsqueeze(1).to(self.device)
+            obs = episodes["obs"][:, 0].unsqueeze(1).to(self.device)
+            avail_actions = episodes["avail_actions"][:, 0].unsqueeze(1).to(self.device)
+            actions_onehot = torch.zeros_like(episodes["actions_onehot"][:, 0].view(batch_size, 1, -1)).to(self.device)
+            term_signal = episodes["terminated"][:, 0].unsqueeze(1).float().to(self.device)
+            terminated = (term_signal > 0)
             active_episodes = [i for i, finished in enumerate(terminated.flatten()) if not finished]
-            if all(terminated):
-                break
 
-            #print("\n=================================================\n")
+            obs_size = self.args.n_agents * self.agent_obs_size
 
-        self.model_episodes += self.args.model_rollout_batch_size
+            # initialise hidden states
+            o_ht_ct = None # obs model hidden states
+            s_ht_ct = None # state model hidden states
+            self.mac.init_hidden(batch_size=batch_size)
 
-        return batch
+            bidx = 0
+            max_t = batch.max_seq_length - 1
+            # generate episode sequence
+            print(f"Collecting {self.args.model_rollout_batch_size} episodes from MODEL ENV using epsilon: {self.mac.action_selector.epsilon:.2f}, model_episodes: {self.model_episodes}")
+            for t in range(max_t):
+
+                # print(f"[{t:01}] active_episodes")
+                # print("   ", active_episodes)
+                #
+                # print(f"[{t:01}] state (excluding action)")
+                # print("   ", state[bidx])
+                #
+                # print(f"[{t:01}] obs")
+                # print("   ", obs[bidx])
+                #
+                # print(f"[{t:01}] avail_actions")
+                # print("   ", avail_actions[bidx])
+
+                #aa = avail_actions
+                # for i in range(aa.size()[0]):
+                #     try:
+                #         a = Categorical(aa[i].float()).sample()
+                #     except:
+                #         print(f"invalid avail actions on batch index {i} at timestep {t:01}")
+                #         print(aa[i])
+                #         for k, v in self.get_state_scheme(custom_features=False).items():
+                #             print(f"{k}: {state[i, :, v].item():.4f}")
+
+                batch_state = state
+                if self.args.env_args["state_last_action"]:
+                    batch_state = torch.cat((state, actions_onehot), dim=-1)
+
+                pre_transition_data = {
+                    "state": batch_state[active_episodes],
+                    "avail_actions": avail_actions[active_episodes],
+                    "obs": obs[active_episodes]
+                }
+                batch.update(pre_transition_data, bs=active_episodes, ts=t)
+
+                # choose actions following current policy
+                actions = self.mac.select_actions(batch, t_ep=t, t_env=t_env, bs=active_episodes, model_action=True).unsqueeze(1)
+                # print(f"[{t:01}] actions")
+                # print("   ", actions[bidx])
+
+                batch.update({"actions": actions}, bs=active_episodes, ts=t)  # this will generate actions_onehot
+                actions_onehot = batch["actions_onehot"][:, t, ...].view(batch_size, 1, -1)  # latest action
+
+                # print(f"[{t:01}] actions_onehot")
+                # print("   ", actions_onehot[bidx])
+
+                # generate next state, reward and termination signal
+                output, s_ht_ct = self.run_state_model(state, actions_onehot, ht_ct=s_ht_ct)
+                state = output[:, :, :self.state_size]; idx = self.state_size
+                reward = output[:, :, idx:idx + self.reward_size]; idx += self.reward_size
+                term_signal = output[:, :, idx:idx + self.term_size]
+
+                # generate termination mask
+                threshold = 0.9
+                terminated = (term_signal > threshold)
+
+                # if this is the last timestep, terminate
+                if t == max_t - 1:
+                    terminated[active_episodes] = True
+
+                # print(f"[{t:01}] terminated")
+                # print("   ", terminated.flatten())
+
+                post_transition_data = {
+                    "reward": reward[active_episodes],
+                    "terminated": terminated[active_episodes]
+                }
+                batch.update(post_transition_data, ts=t, bs=active_episodes)
+
+                # generate new observations
+                output, o_ht_ct = self.run_obs_model(state.to(self.device), ht_ct=o_ht_ct)
+                obs = output[:, 0, :obs_size].view(batch_size, 1, self.args.n_agents, self.agent_obs_size)
+                avail_actions = output[:, 0, obs_size:].view(batch_size, 1, self.args.n_agents, self.args.n_actions)
+
+                # threshold avail_actions
+                threshold = 0.5
+                avail_actions = (avail_actions > threshold).float()
+
+                # handle cases where no agent actions are available e.g. when agent is dead
+                mask = avail_actions.sum(-1) == 0
+                source = torch.zeros_like(avail_actions)
+                source[:, :, :, 0] = 1  # enable no-op
+                avail_actions[mask] = source[mask]
+
+                # add pre-tranition data to the batch at the next timestep
+                pre_transition_data = {
+                    "state": batch_state[active_episodes],
+                    "avail_actions": avail_actions[active_episodes],
+                    "obs": obs[active_episodes]
+                }
+                batch.update(pre_transition_data, bs=active_episodes, ts=t+1)
+
+                # update active episodes
+                active_episodes = [i for i, finished in enumerate(terminated.flatten()) if not finished]
+                if all(terminated):
+                    break
+
+                #print("\n=================================================\n")
+
+            self.model_episodes += self.args.model_rollout_batch_size
+
+            return batch
 
     def plot_episode(self, batch,  plot_dir="plots"):
         state_scheme = self.get_state_scheme(custom_features=True)

@@ -11,14 +11,14 @@ epsilon_delay: 0
 mac: "simple_mac"
 model_action_selector: "model_epsilon_greedy" # used by by model learner on real env
 model_epsilon_start: 1.0
-model_epsilon_finish: 0.5
+model_epsilon_finish: 0.05
 model_epsilon_anneal_time: 50000
-model_epsilon_delay: 30000 # start epsilon decay on env action selection after initial samples have been collected
+model_epsilon_delay: 10000 # start epsilon decay on env action selection after initial samples have been collected
 
 buffer_size: 5000
 
 # update the target network every n episodes
-target_update_interval: 200
+target_update_interval: 32
 
 # use the Q_Learner to train
 agent_output_type: "q"
@@ -32,28 +32,26 @@ hypernet_embed: 64
 # model learning
 model_learner: "simple_learner"
 model_rollout_batch_size: 1 # batch of rollouts to add to model_buffer
+model_rollouts: 1
 model_buffer_size: 5000
-model_min_training_episodes: 1024
-model_n_training_iterations: 1
-model_policy_training_interval: 1 # train model after every n real episodes
-model_policy_improvement_steps: 1
-model_policy_test_interval: 1
-model_training_test_ratio: 0.1
 model_reuse_existing: True
+model_n_collect_episodes: 128
+model_update_interval: 128 # update env model after every n policy learning iterations
+model_training_test_ratio: 0.1
 
 # environment state model learning
-state_model_initial_train_epochs: 1000
-state_model_train_epochs: 1000
-state_model_train_log_epochs: 100
+state_model_initial_train_epochs: 200
+state_model_train_epochs: 200
+state_model_train_log_epochs: 10
 state_model_train_batch_size: 128
 state_model_learning_rate: 0.01
 state_model_grad_clip_norm: 0.1
 state_model_hidden_dim: 128
 
 # environment observation model learning
-obs_model_initial_train_epochs: 1000
-obs_model_train_epochs: 1000
-obs_model_train_log_epochs: 100
+obs_model_initial_train_epochs: 200
+obs_model_train_epochs: 200
+obs_model_train_log_epochs: 10
 obs_model_train_batch_size: 128
 obs_model_learning_rate: 0.01
 obs_model_grad_clip_norm: 0.1
@@ -66,8 +64,8 @@ obs_model_use_mask: True # there are no obs after termination so may as well exc
 
 name: "simple-qmix-bs-1-develop-live"
 
-runner: episode
-batch_size_run: 1
+runner: parallel
+batch_size_run: 32
 
 save_episodes: False
 episode_dir: episodes

@@ -175,93 +175,152 @@ def run_sequential(args, logger):
     start_time = time.time()
     last_time = start_time
 
+    # old stuff
     # model based learning stuff
-    model_episodes = 0
-    model_based_learning_iterations = 0
-    model_based_learning_step = 0
-    buffer_new_episodes = 0
-    model_training_iterations = 0
-    collect_real_episodes = True
-    model_trained = False
-    buffer_dir = "buffers"
+    # model_episodes = 0
+    # model_based_learning_iterations = 0
+    # model_based_learning_step = 0
+    # buffer_new_episodes = 0
+    # model_training_iterations = 0
+    # collect_real_episodes = True
+    # model_trained = False
+    # buffer_dir = "buffers"
+
+    # new stuff
+    collect_episodes = True
+    collected_episodes = 0
+    train_rl = False
+    rl_iterations = 0
 
     logger.console_logger.info("Beginning training for {} timesteps".format(args.t_max))
-
     while runner.t_env <= args.t_max:
 
         if model_learner:
-
-            # collect real episodes
-            if collect_real_episodes:
-                print(
-                    f"Collecting {args.batch_size_run} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon:.2f}, t_env: {runner.t_env}")
-                episode_batch = runner.run(test_mode=False)
+            if collect_episodes:
+                episode_batch = runner.run(test_mode=False)  # collect real episode to progress t_env
+                print(f"Collecting {args.batch_size_run} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon:.2f}, t_env: {runner.t_env}, collected episodes: {collected_episodes}")
                 buffer.insert_episode_batch(episode_batch)
-                buffer_new_episodes += episode_batch.batch_size
+                collected_episodes += args.batch_size_run
 
-            # supervised training of state and observation models
-            if not model_trained and buffer.episodes_in_buffer >= args.model_min_training_episodes:
-                # train initial model
+            if collected_episodes >= args.model_n_collect_episodes:
+                print(f"Collected {collected_episodes} REAL episodes, training ENV model")
+                # stop collection and train model
+                collect_episodes = False
+                collected_episodes = 0
                 model_learner.train(buffer, runner.t_env, plot_test_results=False)
-                buffer_new_episodes -= args.model_min_training_episodes
-                model_training_iterations += 1
-                model_trained = True
-                #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
-                #            verbose=True)
-                #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
-                #            verbose=True)
+                train_rl = True
 
-            elif model_trained and model_training_iterations < args.model_n_training_iterations and \
-                    buffer_new_episodes >= args.model_policy_training_interval:
-                model_learner.train(buffer, runner.t_env, plot_test_results=False)
-                buffer_new_episodes -= args.model_policy_training_interval
-                model_training_iterations += 1
-                #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
-                #            verbose=True)
-                #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
-                #            verbose=True)
-                # # plot a generated episode
-                # with th.no_grad():
-                #     model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
-                #     model_learner.plot_episode(model_batch)
+            if train_rl: # and model_buffer.can_sample(args.batch_size):
 
-            # learn from model
-            if model_trained:
-                # generate buffer of synthetic episodes from real starts using current policy
-                with th.no_grad():
-                    # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
-                    model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
-                    #model_learner.plot_episode(model_batch)
-
+                # generate synthetic episodes under current policy
+                print(f"Generating {args.model_rollouts} MODEL episodes")
+                # rollouts = 0
+                rollout_batch_size = min(buffer.episodes_in_buffer, args.model_rollout_batch_size)
+                # while rollouts < args.model_rollouts:
+                model_batch = model_learner.generate_batch(buffer, rollout_batch_size, rl_iterations)
                 model_buffer.insert_episode_batch(model_batch)
+                #rollouts += rollout_batch_size
 
-                for i in range(args.model_policy_improvement_steps):
+                if model_buffer.can_sample(args.batch_size):
+                    episode_sample = model_buffer.sample(args.batch_size)
 
-                    # improve policy
-                    if model_buffer.can_sample(args.batch_size):
+                    # truncate batch to only filled timesteps
+                    #max_ep_t = episode_sample.max_t_filled()
+                    #episode_sample = episode_sample[:, :max_ep_t]
 
-                        # sample episode batch from the model replay buffer
-                        model_episode_sample = model_buffer.sample(args.batch_size)
+                    if episode_sample.device != args.device:
+                        episode_sample.to(args.device)
 
-                        # truncate batch to only filled timesteps
-                        #max_ep_t = model_episode_sample.max_t_filled()
-                        #model_episode_sample = model_episode_sample[:, :max_ep_t]
+                    # train RL agent
+                    learner.train(episode_sample, runner.t_env, rl_iterations)
+                    rl_iterations += 1
+                    print(f"Model RL iteration {rl_iterations}, t_env: {runner.t_env}")
 
-                        if model_episode_sample.device != args.device:
-                            model_episode_sample.to(args.device)
+            if not collect_episodes and rl_iterations > 0 and rl_iterations % args.model_update_interval == 0:
+                print(f"Time to update model")
+                collect_episodes = True
+                train_rl = False
 
-                        # train RL agent
-                        learner.train(model_episode_sample, runner.t_env, model_episodes)
-                        model_based_learning_iterations += 1
-                        model_episodes += args.model_rollout_batch_size
-
-                        # Execute test runs once in a while
-                        # if model_based_learning_iterations % args.model_policy_test_interval == 0:
-                        #     print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
-                        #     runner.run(test_mode=True)
-                        #     logger.print_recent_stats()
-                model_based_learning_step += 1
+            # update stats
             model_learner.log_stats(runner.t_env)
+            if (runner.t_env - last_log_T) >= args.log_interval:
+                logger.log_stat("model_rl_iterations", rl_iterations, runner.t_env)
+
+
+
+        # if model_learner:
+        #
+        #     # collect real episodes
+        #     if collect_real_episodes:
+        #         print(
+        #             f"Collecting {args.batch_size_run} episodes from REAL ENV using epsilon: {runner.mac.env_action_selector.epsilon:.2f}, t_env: {runner.t_env}")
+        #         episode_batch = runner.run(test_mode=False)
+        #         buffer.insert_episode_batch(episode_batch)
+        #         buffer_new_episodes += episode_batch.batch_size
+        #
+        #     # supervised training of state and observation models
+        #     if not model_trained and buffer.episodes_in_buffer >= args.model_min_training_episodes:
+        #         # train initial model
+        #         model_learner.train(buffer, runner.t_env, plot_test_results=False)
+        #         buffer_new_episodes -= args.model_min_training_episodes
+        #         model_training_iterations += 1
+        #         model_trained = True
+        #         #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
+        #         #            verbose=True)
+        #         #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
+        #         #            verbose=True)
+        #
+        #     elif model_trained and model_training_iterations < args.model_n_training_iterations and \
+        #             buffer_new_episodes >= args.model_policy_training_interval:
+        #         model_learner.train(buffer, runner.t_env, plot_test_results=False)
+        #         buffer_new_episodes -= args.model_policy_training_interval
+        #         model_training_iterations += 1
+        #         #save_buffer(buffer, os.path.join(buffer_dir, f"real_buffer_{model_training_iteration}.pkl"),
+        #         #            verbose=True)
+        #         #save_buffer(model_buffer, os.path.join(buffer_dir, f"model_buffer_{model_training_iteration}.pkl"),
+        #         #            verbose=True)
+        #         # # plot a generated episode
+        #         # with th.no_grad():
+        #         #     model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
+        #         #     model_learner.plot_episode(model_batch)
+        #
+        #     # learn from model
+        #     if model_trained:
+        #         # generate buffer of synthetic episodes from real starts using current policy
+        #         with th.no_grad():
+        #             # model_batch = model_learner.generate_batch(buffer, runner.t_env + model_based_learning_step)
+        #             model_batch = model_learner.generate_batch(buffer, model_based_learning_step)
+        #             #model_learner.plot_episode(model_batch)
+        #
+        #         model_buffer.insert_episode_batch(model_batch)
+        #
+        #         for i in range(args.model_policy_improvement_steps):
+        #
+        #             # improve policy
+        #             if model_buffer.can_sample(args.batch_size):
+        #
+        #                 # sample episode batch from the model replay buffer
+        #                 model_episode_sample = model_buffer.sample(args.batch_size)
+        #
+        #                 # truncate batch to only filled timesteps
+        #                 #max_ep_t = model_episode_sample.max_t_filled()
+        #                 #model_episode_sample = model_episode_sample[:, :max_ep_t]
+        #
+        #                 if model_episode_sample.device != args.device:
+        #                     model_episode_sample.to(args.device)
+        #
+        #                 # train RL agent
+        #                 learner.train(model_episode_sample, runner.t_env, model_episodes)
+        #                 model_based_learning_iterations += 1
+        #                 model_episodes += args.model_rollout_batch_size
+        #
+        #                 # Execute test runs once in a while
+        #                 # if model_based_learning_iterations % args.model_policy_test_interval == 0:
+        #                 #     print(f"Testing model learning iteration {model_based_learning_iterations} ... ")
+        #                 #     runner.run(test_mode=True)
+        #                 #     logger.print_recent_stats()
+        #         model_based_learning_step += 1
+        #     model_learner.log_stats(runner.t_env)
         else:
             episode_batch = runner.run(test_mode=False)
             buffer.insert_episode_batch(episode_batch)

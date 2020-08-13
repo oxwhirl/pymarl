@@ -31,6 +31,10 @@ def my_main(_run, _config, _log):
     th.manual_seed(config["seed"])
     config['env_args']['seed'] = config["seed"]
 
+    if config["use_cuda"]:
+        th.backends.cudnn.deterministic = True
+        th.backends.cudnn.benchmark = False
+    
     # run the framework
     run(_run, config, _log)
 

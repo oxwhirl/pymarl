@@ -142,7 +142,7 @@ class QLearner:
             self.logger.log_stat("td_loss", td_loss.item(), t_env)
             self.logger.log_stat("opt_loss", opt_loss.item(), t_env)
             self.logger.log_stat("nopt_loss", nopt_loss.item(), t_env)
-            self.logger.log_stat("grad_norm", grad_norm, t_env)
+            self.logger.log_stat("grad_norm", grad_norm.item(), t_env)
             if self.args.mixer == "qtran_base":
                 mask_elems = mask.sum().item()
                 self.logger.log_stat("td_error_abs", (masked_td_error.abs().sum().item()/mask_elems), t_env)

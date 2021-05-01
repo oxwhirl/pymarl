@@ -1,3 +1,5 @@
+import numbers
+
 import torch as th
 import numpy as np
 from types import SimpleNamespace as SN
@@ -60,7 +62,7 @@ class EpisodeBatch:
             group = field_info.get("group", None)
             dtype = field_info.get("dtype", th.float32)
 
-            if isinstance(vshape, int):
+            if isinstance(vshape, numbers.Integral):
                 vshape = (vshape,)
 
             if group:

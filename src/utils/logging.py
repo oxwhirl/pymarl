@@ -49,6 +49,8 @@ class Logger:
             log_str += "{:<25}{:>8}".format(k + ":", item)
             log_str += "\n" if i % 4 == 0 else "\t"
         self.console_logger.info(log_str)
+        # Reset stats to avoid accumulating logs in memory
+        self.stats = defaultdict(lambda: [])
 
 
 # set up a custom logger

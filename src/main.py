@@ -31,6 +31,10 @@ def my_main(_run, _config, _log):
     th.manual_seed(config["seed"])
     config['env_args']['seed'] = config["seed"]
 
+    if config["use_cuda"]:
+        th.backends.cudnn.deterministic = True
+        th.backends.cudnn.benchmark = False
+    
     # run the framework
     run(_run, config, _log)
 
@@ -92,7 +96,9 @@ if __name__ == '__main__':
 
     # Save to disk by default for sacred
     logger.info("Saving to FileStorageObserver in results/sacred.")
-    file_obs_path = os.path.join(results_path, "sacred")
+    file_obs_path = os.path.join(os.path.join(
+        os.path.join(results_path, config_dict['env_args']['map_name']), config_dict['name']), "sacred")
+    
     ex.observers.append(FileStorageObserver.create(file_obs_path))
 
     ex.run_commandline(params)

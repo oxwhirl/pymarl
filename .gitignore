@@ -1,0 +1,5 @@
+**/tb_logs/
+**/results/
+**/3rdparty
+**/__MACOSX
+**/__pycache__

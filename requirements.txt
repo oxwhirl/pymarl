@@ -23,7 +23,7 @@ Pillow==6.2.0
 pluggy==0.7.1
 portpicker==1.2.0
 probscale==0.2.3
-protobuf==3.6.1
+protobuf==3.18.3
 py==1.6.0
 pygame==1.9.4
 pyparsing==2.2.2

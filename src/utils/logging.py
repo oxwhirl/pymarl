@@ -24,9 +24,9 @@ class Logger:
         self.sacred_info = sacred_run_dict.info
         self.use_sacred = True
 
-    def setup_wandb(self, name, d):
+    def setup_wandb(self, name, d, conf):
         import wandb
-        wandb.init(project=name, dir=d)
+        wandb.init(project=name, dir=d, config=conf)
         self.wandb_logger = wandb.log
         self.use_wandb = True
 

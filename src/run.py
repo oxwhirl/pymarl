@@ -40,6 +40,9 @@ def run(_run, _config, _log):
         tb_logs_direc = os.path.join(dirname(dirname(abspath(__file__))), "results", "tb_logs")
         tb_exp_direc = os.path.join(tb_logs_direc, "{}").format(unique_token)
         logger.setup_tb(tb_exp_direc)
+    if args.use_wandb:
+        wandb_logs_dir = os.path.join(dirname(dirname(abspath(__file__))), "results")
+        logger.setup_wandb('pymarl-baselines',  wandb_logs_dir)
 
     # sacred is on by default
     logger.setup_sacred(_run)

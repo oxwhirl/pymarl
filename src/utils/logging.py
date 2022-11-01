@@ -8,6 +8,7 @@ class Logger:
 
         self.use_tb = False
         self.use_sacred = False
+        self.use_wandb = False
         self.use_hdf = False
 
         self.stats = defaultdict(lambda: [])
@@ -23,11 +24,20 @@ class Logger:
         self.sacred_info = sacred_run_dict.info
         self.use_sacred = True
 
+    def setup_wandb(self, name, d):
+        import wandb
+        wandb.init(project=name, dir=d)
+        self.wandb_logger = wandb.log
+        self.use_wandb = True
+
     def log_stat(self, key, value, t, to_sacred=True):
         self.stats[key].append((t, value))
 
         if self.use_tb:
             self.tb_logger(key, value, t)
+        
+        if self.use_wandb:
+            self.wandb_logger({key : value})
 
         if self.use_sacred and to_sacred:
             if key in self.sacred_info:

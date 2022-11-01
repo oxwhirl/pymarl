@@ -18,6 +18,7 @@ buffer_cpu_only: True # If true we won't keep all of the replay buffer in vram
 
 # --- Logging options ---
 use_tensorboard: False # Log results to tensorboard
+use_wandb: True # Log results to wandb
 save_model: False # Save the models to disk
 save_model_interval: 2000000 # Save models after this many timesteps
 checkpoint_path: "" # Load a checkpoint from this path
@@ -41,6 +42,14 @@ agent: "rnn" # Default rnn agent
 rnn_hidden_dim: 64 # Size of hidden state for default rnn agent
 obs_agent_id: True # Include the agent's one_hot id in the observation
 obs_last_action: True # Include the agent's last action (one_hot) in the observation
+
+# --- Transformer parameters. Should be set manually. ---
+token_dim: 5 # Marines. For other unit type (e.g. Zeolot) this number can be different (6).
+emb: 32 # embedding dimension of transformer
+heads: 3 # head number of transformer
+depth: 2 # block number of transformer
+ally_num: 3 # number of ally (5m_vs_6m)
+enemy_num: 3 # number of enemy (5m_vs_6m)
 
 # --- Experiment running params ---
 repeat_id: 1

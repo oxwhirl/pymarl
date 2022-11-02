@@ -8,6 +8,7 @@
 
 PyMARL is [WhiRL](http://whirl.cs.ox.ac.uk)'s framework for deep multi-agent reinforcement learning and includes implementations of the following algorithms:
 - [**QMIX**: QMIX: Monotonic Value Function Factorisation for Deep Multi-Agent Reinforcement Learning](https://arxiv.org/abs/1803.11485)
+- [**WQMIX**: Weighted QMIX: Expanding Monotonic Value Function Factorisation](https://arxiv.org/abs/2006.10800)
 - [**COMA**: Counterfactual Multi-Agent Policy Gradients](https://arxiv.org/abs/1705.08926)
 - [**VDN**: Value-Decomposition Networks For Cooperative Multi-Agent Learning](https://arxiv.org/abs/1706.05296) 
 - [**IQL**: Independent Q-Learning](https://arxiv.org/abs/1511.08779)
@@ -100,3 +101,26 @@ In BibTeX format:
 ## License
 
 Code licensed under the Apache License v2.0
+
+---
+
+## Extra READMEs
+
+## **WQMIX**
+
+Note that in the repository the naming of certain hyper-parameters and concepts is a little different to the paper:
+- &alpha; in the paper is `w` in the code
+- Optimistic Weighting (OW) is referred to as `hysteretic_qmix`
+
+## Running experiments
+
+The config files (`src/config/algs/*.yaml`) contain default hyper-parameters for the respective algorithms.
+These were changed when running the experiments for the paper (`epsilon_anneal_time = 1000000` for the robustness to exploration experiments, and `w=0.1` for the predator prey punishment experiments for instance).
+Please see the Appendix of the paper for the exact hyper-parameters used. 
+
+<!-- Set `central_mixer=atten` to get the modified mixing network architecture that was used for the final experiment on `corridor` in the paper. -->
+
+As an example, to run the OW-QMIX on 3s5z with epsilon annealed over 1mil timesteps:
+```shell
+python3 src/main.py --config=ow_qmix --env-config=sc2 with env_args.map_name=3s5z w=0.5 epsilon_anneal_time=1000000
+```

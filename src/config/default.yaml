@@ -36,6 +36,7 @@ critic_lr: 0.0005 # Learning rate for critics
 optim_alpha: 0.99 # RMSProp alpha
 optim_eps: 0.00001 # RMSProp epsilon
 grad_norm_clip: 10 # Reduce magnitude of gradients above this L2 norm
+gated: False
 
 # --- Agent parameters ---
 agent: "rnn" # Default rnn agent
@@ -50,6 +51,8 @@ heads: 3 # head number of transformer
 depth: 2 # block number of transformer
 ally_num: 3 # number of ally (5m_vs_6m)
 enemy_num: 3 # number of enemy (5m_vs_6m)
+
+training_iters: 1 # Number of times to train after doing $(batch_size_run) episode rollouts
 
 # --- Experiment running params ---
 repeat_id: 1

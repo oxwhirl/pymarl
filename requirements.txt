@@ -1,7 +1,7 @@
 absl-py==0.5.0
 atomicwrites==1.2.1
 attrs==18.2.0
-certifi==2018.8.24
+certifi==2022.12.7
 chardet==3.0.4
 cycler==0.10.0
 docopt==0.6.2
